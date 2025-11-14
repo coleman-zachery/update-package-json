@@ -1,25 +1,81 @@
+from get_project_root import get_project_root
 from datetime import datetime, timezone, timedelta
-import os
-import re
+from InquirerPy import inquirer
 import json
-import subprocess
 from packaging.version import parse
+import pathlib
+import re
+from rich.console import Console
+import shutil
+import subprocess
+import typer
+
+console = Console()
+app = typer.Typer()
+
+PROJECT_ROOT = get_project_root()
+TEMP_FILES = ["package-backup.json", "package-versions.json", "package-peerDependencies.json", ".npm_cache.json"]
+
+# TODO: handle stale dependencies
+STALE_DEPENDENCIES_FILE = "<placeholder>.json"
+
+# region -
+# region INIT
 
 
 
 
 
+# region -
+# region . find_packages
+def find_packages():
+    skip_directories = {
+        "node_modules", "__pycache__", ".git", ".idea", ".vscode",
+        "dist", "build", "venv", ".venv",
+    }
+    results: list[pathlib.PosixPath] = []
+    for directory_path, directories, files in PROJECT_ROOT.walk(top_down=True, follow_symlinks=False):
+        directories[:] = [directory for directory in directories if directory not in skip_directories]
+        if "package.json" in files: results.append(directory_path / "package.json")
+    return results
+
+# region . select_package
+def select_package():
+    package_paths = find_packages()
+    if len(package_paths) == 0:
+        console.print("[red]No package.json files found in the project.[/red]")
+        raise typer.Exit()
+    selected_package = inquirer.select(
+        message="\nSelect a package.json to update:",
+        choices=[str(package_path.relative_to(PROJECT_ROOT)) for package_path in package_paths] + ["EXIT"],
+    ).execute()
+    if selected_package == "EXIT":
+        console.print("[orange]exiting[/orange]")
+        raise typer.Exit()
+    return (PROJECT_ROOT / pathlib.Path(selected_package)).parent
+
+# region . backup_package
+def backup_package(package_directory: pathlib.PosixPath):
+    package_path = package_directory / "package.json"
+    package_backup_path = package_directory / "package-backup.json"
+    shutil.copy2(package_path, package_backup_path)
+    console.print(f"created backup package: {package_backup_path}")
 
 
 
 
 
-# ------------------------------
-# I/O
-# ------------------------------
+# region -
+# region FILE I/O
 
-def get_dependencies_list():
-    with open("package.json", "r") as file:
+
+
+
+
+# region -
+# region . get_dependencies_list
+def get_dependencies_list(package_directory: pathlib.PosixPath):
+    with open(package_directory / "package.json", "r") as file:
         package = json.load(file)
         dependencies_list = []
         for key, value in package.items():
@@ -27,23 +83,23 @@ def get_dependencies_list():
                 dependencies_list.extend(list(value))
         return dependencies_list
 
+# region . get_latest_version_restrictions
+def get_latest_version_restrictions(package_directory: pathlib.PosixPath):
+    with open(package_directory / "package.json", "r") as file:
+        package = json.load(file)
+        return package.get("latestVersionRestrictions", {})
 
-
-
-
-def write_package_versions(package):
-    with open("package-versions.json", "w") as file:
+# region . write_package_versions
+def write_package_versions(package_directory: pathlib.PosixPath, package):
+    with open(package_directory / "package-versions.json", "w") as file:
         package_versions = {}
         for dependency, dependency_info in package.items():
             package_versions[dependency] = dependency_info["version"]
         json.dump(package_versions, file, indent=4)
 
-
-
-
-
-def write_package_peerDependencies(package):
-    with open("package-peerDependencies.json", "w") as file:
+# region . write_package_peerDependencies
+def write_package_peerDependencies(package_directory: pathlib.PosixPath, package):
+    with open(package_directory / "package-peerDependencies.json", "w") as file:
         package_peerDependencies = {}
         for dependency, dependency_info in package.items():
             package_peerDependencies[dependency] = {}
@@ -52,39 +108,34 @@ def write_package_peerDependencies(package):
                     package_peerDependencies[dependency][key] = value
         json.dump(package_peerDependencies, file, indent=4)
 
-
-
-
-
-def print_added_peerDependencies(package):
+# region . print_added_peerDependencies
+def print_added_peerDependencies(package_directory: pathlib.PosixPath, package):
     added_peerDependencies = []
-    dependencies = get_dependencies_list()
+    dependencies = get_dependencies_list(package_directory)
     for dependency in package:
         if dependency in dependencies: continue
         added_peerDependencies.append(dependency)
-    print(f"\nadded peerDependencies: {added_peerDependencies}")
+    console.print(f"\nadded peerDependencies: {added_peerDependencies}")
 
-
-
-
-
+# region . print_stale_dependencies
 def print_stale_dependencies(package):
     stale_dependencies = []
     for dependency, dependency_info in package.items():
         if dependency_info["stale"]:
             stale_dependencies.append(dependency)
-    print(f"\nstale dependencies found: {stale_dependencies}")
+    console.print(f"\nstale dependencies found: {stale_dependencies}")
 
-
-
-
-
-def overwrite_package(overwrite):
-    if not overwrite: overwrite = input('\nEnter "yes" to overwrite package.json: ')
-    if overwrite.strip().lower() == "yes":
-        with open("package-versions.json", "r") as file:
+# region . overwrite_package
+def overwrite_package(package_directory: pathlib.PosixPath):
+    overwrite = inquirer.confirm(
+        message="Do you want to overwrite and update versions to {package_path}?",
+        default=False,
+    ).execute()
+    if overwrite:
+        package_path = pathlib.Path(package_directory / "package.json")
+        with open(package_directory / "package-versions.json", "r") as file:
             package_versions = json.load(file)
-        with open("package.json", "r") as file:
+        with open(package_path, "r") as file:
             package_json = json.load(file)
         updated_dependencies = []
         for key in package_json:
@@ -96,90 +147,91 @@ def overwrite_package(overwrite):
         for dependency, version in package_versions.items():
             if dependency in updated_dependencies: continue
             package_json["dependencies"][dependency] = version
-        with open("package.json", "w") as file:
+        with open(package_path, "w") as file:
             json.dump(package_json, file, indent=4)
-        print("package.json has been updated with versions from package-versions.json.")
+        console.print(f"[bold green]{package_path} has been updated with versions from package-versions.json.[/bold green]")
+        cleanup_temp_files(package_directory)
+    else:
+        console.print(f"Package update was not performed for {package_path}.")
+
+# region . cleanup_temp_files
+def cleanup_temp_files(package_directory: pathlib.PosixPath):
+    remove_files = inquirer.confirm(
+        message="Remove temporary files?",
+        default=False,
+    ).execute()
+    if remove_files:
+        for TEMP_FILE in TEMP_FILES:
+            TEMP_FILE_PATH = package_directory / TEMP_FILE
+            if TEMP_FILE_PATH.exists():
+                TEMP_FILE_PATH.unlink()
+                console.print(f"[green]Removed {TEMP_FILE}[/green]")
 
 
 
 
 
+# region -
+# region NPM HELPERS
 
 
 
 
 
-# ------------------------------
-# npm info shell
-# ------------------------------
-
+# region -
+# region . json_npm_shell
 def json_npm_shell(command, dependency, field, default="{}"):
     output = subprocess.run(f"npm {command} {dependency} {field} --json", shell=True, capture_output=True, text=True).stdout.strip()
     return json.loads(output or default)
 
-
-
-
-
-def npm_cache(command, dependency, field, default="{}"):
+# region . npm_cache
+def npm_cache(package_directory: pathlib.PosixPath, command, dependency, field, default="{}"):
     NPM_CACHE_FILE = ".npm_cache.json"
     full_command = f"{command} {dependency} {field}"
     cache, data = {}, None
-    if os.path.exists(NPM_CACHE_FILE):
-        with open(NPM_CACHE_FILE, "r") as file:
+    if (package_directory / NPM_CACHE_FILE).exists():
+        with open(package_directory / NPM_CACHE_FILE, "r") as file:
             cache = json.load(file)
         if full_command in cache: return cache[full_command]
     data = json_npm_shell(command, dependency, field, default=default)
     cache[full_command] = data
-    with open(NPM_CACHE_FILE, "w") as file:
+    with open(package_directory / NPM_CACHE_FILE, "w") as file:
         json.dump(cache, file, indent=4)
     return data
 
-
-
-
-
-def get_versions(dependency):
-    print(f"{dependency}: versions", end=" ", flush=True)
-    versions_output = npm_cache("info", dependency, "versions", "[]")
+# region . get_versions
+def get_versions(package_directory: pathlib.PosixPath, dependency):
+    console.print(f"{dependency}: versions", end=" ")
+    versions_output = npm_cache(package_directory, "info", dependency, "versions", "[]")
     pattern = r"\d+\.\d+\.\d+(?:-0)?"
     filtered_versions = list(set([version for version in versions_output if re.fullmatch(pattern, version)]))
     versions = sorted(filtered_versions, key=parse, reverse=True)
-    print(f"({len(versions)})", end=" ", flush=True)
+    console.print(f"({len(versions)})", end=" ")
     return versions
 
-
-
-
-
-def get_latest_version(dependency):
-    print("latest version", end=" ", flush=True)
-    dist_tags_output = npm_cache("view", dependency, "dist-tags")
+# region . get_latest_version
+def get_latest_version(package_directory: pathlib.PosixPath, dependency):
+    console.print(f"latest version", end=" ")
+    dist_tags_output = npm_cache(package_directory, "view", dependency, "dist-tags")
     latest_version = dist_tags_output["latest"]
-    print(f"({latest_version})", end=" ", flush=True)
+    console.print(f"({latest_version})", end=" ")
     return latest_version
 
-
-
-
-
-def get_peerDependencies(dependency, version, mute=False):
-    if mute == False: print("peerDependencies", end=" ", flush=True)
-    peerDependencies_output = npm_cache("info", f"{dependency}@{version}", "peerDependencies")
-    peerDependenciesMeta_output = npm_cache("info", f"{dependency}@{version}", "peerDependenciesMeta")
+# region . get_peerDependencies
+def get_peerDependencies(package_directory: pathlib.PosixPath, dependency, version, mute=False):
+    if mute == False: console.print(f"peerDependencies", end=" ")
+    peerDependencies_output = npm_cache(package_directory, "info", f"{dependency}@{version}", "peerDependencies")
+    peerDependenciesMeta_output = npm_cache(package_directory, "info", f"{dependency}@{version}", "peerDependenciesMeta")
     peerDependencies = {}
     for peer, semver_requirements in peerDependencies_output.items():
         if peerDependenciesMeta_output.get(peer, {}).get("optional", False): continue
         peerDependencies[peer] = semver_requirements
-    if mute == False: print(f"({len(peerDependencies)})", flush=True)
+    if mute == False: console.print(f"({len(peerDependencies)})")
     return peerDependencies
 
-
-
-
-
-def is_dependency_stale(dependency, years=1):
-    time_output = npm_cache("info", dependency, "time")
+# region . is_dependency_stale
+def is_dependency_stale(package_directory: pathlib.PosixPath, dependency, years=1):
+    time_output = npm_cache(package_directory, "info", dependency, "time")
     filtered_time = [(version, timestamp) for version, timestamp in time_output.items() if version != "modified"]
     latest_timestamp = max(timestamp for _, timestamp in filtered_time).replace("Z", "+00:00")
     then = datetime.fromisoformat(latest_timestamp)
@@ -191,15 +243,15 @@ def is_dependency_stale(dependency, years=1):
 
 
 
+# region -
+# region SEMVER
 
 
 
 
 
-# ------------------------------
-# semver
-# ------------------------------
-
+# region -
+# region . range_intersection
 def range_intersection(range1, range2):
     min1, max1 = range1
     min2, max2 = range2
@@ -208,10 +260,7 @@ def range_intersection(range1, range2):
     if max_ != "inf" and min_ >= max_: return None
     return min_, max_
 
-
-
-
-
+# region . check_version_compatibility
 def check_version_compatibility(semver_version, semver_requirements):
 
     def _semver_to_tuple(semver):
@@ -268,57 +317,49 @@ def check_version_compatibility(semver_version, semver_requirements):
 
 
 
+# region -
+# region PACKAGE UPDATE LOGIC
 
 
 
 
 
-
-# ------------------------------
-# un-used
-# ------------------------------
-
-def range_union(range1, range2):
-    if range_intersection(range1, range2) is None and range1[1] != range2[0] and range2[1] != range1[0]: return None
-    min1, max1 = range1
-    min2, max2 = range2
-    new_min = min(min1, min2)
-    new_max = max(max1, max2) if max1 != "inf" and max2 != "inf" else "inf"
-    return new_min, new_max
-
-
-
-
-
-def semver_range_to_string(range_):
-    def parts_to_string(parts): return ".".join(str(p) if p is not None else "x" for p in parts)
-    min_parts, max_parts = range_
-    min_str = f">={parts_to_string(min_parts)}"
-    if max_parts == "inf": return min_str
-    max_str = f"<{parts_to_string(max_parts)}"
-    return f"{min_str} {max_str}"
-
-
-
-
-
-
-
-
-
-
-# ------------------------------
-# package logic
-# ------------------------------
-
-def add_recursive_dependency_to_package(package, dependency, required_by="<root>", include_stale_dependencies=[]):
+# region -
+# region . add_recursive_dependency_to_package
+def add_recursive_dependency_to_package(
+    package_directory,
+    package, dependency, required_by="<root>",
+    include_stale_dependencies=[],
+    latest_version_restrictions={}
+):
     if dependency in package:
-        if required_by not in package[dependency]["required_by"]: package[dependency]["required_by"].append(required_by)
+        if required_by not in package[dependency]["required_by"]:
+            package[dependency]["required_by"].append(required_by)
     else:
-        versions = get_versions(dependency)
-        latest_version = get_latest_version(dependency)
-        peerDependencies = get_peerDependencies(dependency, latest_version)
-        stale = False if dependency in include_stale_dependencies or len(peerDependencies) == 0 else is_dependency_stale(dependency)
+        versions = get_versions(package_directory, dependency)
+
+        if dependency in latest_version_restrictions:
+            requested_version = latest_version_restrictions[dependency]
+            if requested_version in versions:
+                latest_version = requested_version
+                console.print(f"restricted version ({requested_version})", end=" ")
+            else:
+                fallback_version = None
+                for version in versions:
+                    if parse(version) < parse(requested_version):
+                        fallback_version = version
+                        break
+                if fallback_version:
+                    latest_version = fallback_version
+                    console.print(f"restricted version {requested_version} not found, using fallback version ({fallback_version})", end=" ")
+                else:
+                    latest_version = versions[0]
+                    console.print(f"restricted version {requested_version} not found, using latest version ({latest_version})", end=" ")
+        else:
+            latest_version = get_latest_version(package_directory, dependency)
+
+        peerDependencies = get_peerDependencies(package_directory, dependency, latest_version)
+        stale = False if dependency in include_stale_dependencies else is_dependency_stale(package_directory, dependency)
         package[dependency] = {
             "versions": versions,
             "version": latest_version,
@@ -327,13 +368,15 @@ def add_recursive_dependency_to_package(package, dependency, required_by="<root>
             "stale": stale,
         }
         for peer in peerDependencies:
-            package = add_recursive_dependency_to_package(package, peer, required_by=dependency, include_stale_dependencies=include_stale_dependencies)
+            package = add_recursive_dependency_to_package(
+                package_directory,
+                package, peer, required_by=dependency,
+                include_stale_dependencies=include_stale_dependencies,
+                latest_version_restrictions=latest_version_restrictions
+            )
     return package
 
-
-
-
-
+# region . check_package_problems
 def check_package_problems(package):
     problems = {
         "greater_than": {},
@@ -355,18 +398,15 @@ def check_package_problems(package):
         if stop: return dependency, dependency_version, problems
     return None
 
+# region . resolve_package_problems
+def resolve_package_problems(package_directory, package, package_problems, include_stale_dependencies=[]):
 
-
-
-
-def resolve_package_problems(package, package_problems, include_stale_dependencies=[]):
-
-    def _update_dependency_version(package, dependency, version, peerDependencies=None, include_stale_dependencies=[]):
+    def _update_dependency_version(package_directory, package, dependency, version, peerDependencies=None, include_stale_dependencies=[]):
         previous_peerDependencies = package[dependency]["peerDependencies"]
-        new_peerDependencies = peerDependencies or get_peerDependencies(dependency, version, mute=True)
+        new_peerDependencies = peerDependencies or get_peerDependencies(package_directory, dependency, version, mute=True)
         package[dependency]["version"] = version
         package[dependency]["peerDependencies"] = new_peerDependencies
-        stale = False if dependency in include_stale_dependencies or len(new_peerDependencies) == 0 else is_dependency_stale(dependency)
+        stale = False if dependency in include_stale_dependencies else is_dependency_stale(package_directory, dependency)
         package[dependency]["stale"] = stale
         for p in previous_peerDependencies:
             if p not in new_peerDependencies:
@@ -391,21 +431,21 @@ def resolve_package_problems(package, package_problems, include_stale_dependenci
                     if peer not in peers: peers.append(peer)
                     continue
                 break
-            package = _update_dependency_version(package, dependency, version, peerDependencies=None, include_stale_dependencies=include_stale_dependencies)
+            package = _update_dependency_version(package_directory, package, dependency, version, peerDependencies=None, include_stale_dependencies=include_stale_dependencies)
             if len(peers) > 0:
                 satisfied_peers = peers
-        print(f"\ndowngraded {dependency}: {dependency_version} --> {version}")
+        console.print(f"\ndowngraded {dependency}: {dependency_version} --> {version}")
         for peer in satisfied_peers:
-            print(f"-- satisfied {peer}@{package[peer]["version"]} peerDependency: {dependency}@{problems["greater_than"][peer]}")
+            console.print(f"-- satisfied {peer}@{package[peer]["version"]} peerDependency: {dependency}@{problems["greater_than"][peer]}")
 
-    def _find_compatible_version(peer, dependency, dependency_version, package):
+    def _find_compatible_version(package_directory, peer, dependency, dependency_version, package):
         versions = package[peer]["versions"]
         lo, hi = 0, len(versions) - 1
         result = None
         while lo <= hi:
             mid = (lo + hi) // 2
             version = versions[mid]
-            temp_peerDependencies = get_peerDependencies(peer, version, mute=True)
+            temp_peerDependencies = get_peerDependencies(package_directory, peer, version, mute=True)
             dependency_requirements = temp_peerDependencies.get(dependency)
             if dependency_requirements is None:
                 hi = mid - 1
@@ -424,41 +464,55 @@ def resolve_package_problems(package, package_problems, include_stale_dependenci
     for peer, _ in problems["else"].items():
         peer_version = package[peer]["version"]
         peer_requirements = package[peer]["peerDependencies"][dependency]
-        version = _find_compatible_version(peer, dependency, dependency_version, package)
+        version = _find_compatible_version(package_directory, peer, dependency, dependency_version, package)
         if version:
-            print(f"\ndowngraded {peer}: {peer_version} --> {version}")
-            temp_peerDependencies = get_peerDependencies(peer, version, mute=True)
-            package = _update_dependency_version(package, peer, version, peerDependencies=temp_peerDependencies, include_stale_dependencies=include_stale_dependencies)
-            print(f"-- satisfies {peer}@{version} new peerDependency for {dependency}@{dependency_version}: {dependency}@{package[peer]["peerDependencies"][dependency]} (previous peerDependency: {dependency}@{peer_requirements})")
+            console.print(f"\ndowngraded {peer}: {peer_version} --> {version}")
+            temp_peerDependencies = get_peerDependencies(package_directory, peer, version, mute=True)
+            package = _update_dependency_version(package_directory, package, peer, version, peerDependencies=temp_peerDependencies, include_stale_dependencies=include_stale_dependencies)
+            console.print(f"-- satisfies {peer}@{version} new peerDependency for {dependency}@{dependency_version}: {dependency}@{package[peer]["peerDependencies"][dependency]} (previous peerDependency: {dependency}@{peer_requirements})")
 
     return package
 
+# region -
+# region MAIN
 
 
 
 
 
-
-
-
-
-# ------------------------------
-# Main
-# ------------------------------
-
+# region -
 def main():
+    console.clear()
+    package_directory = select_package()
+    console.print(f"[bold blue]Working in:[/bold blue] {package_directory}")
+    backup_package(package_directory)
+
     include_stale_dependencies = []
     package = {}
-    print("finding package dependency versions and peerDependencies...")
-    for dependency in get_dependencies_list():
-        package = add_recursive_dependency_to_package(package, dependency, required_by="<root>", include_stale_dependencies=include_stale_dependencies)
+    latest_version_restrictions = get_latest_version_restrictions(package_directory)
+    console.print("finding package dependency versions and peerDependencies...")
+
+    for dependency in get_dependencies_list(package_directory):
+        package = add_recursive_dependency_to_package(
+            package_directory,
+            package, dependency, required_by="<root>",
+            include_stale_dependencies=include_stale_dependencies,
+            latest_version_restrictions=latest_version_restrictions)
+
     while package_problems := check_package_problems(package):
-        package = resolve_package_problems(package, package_problems, include_stale_dependencies=include_stale_dependencies)
-    write_package_peerDependencies(package)
-    write_package_versions(package)
-    print_added_peerDependencies(package)
+        package = resolve_package_problems(
+            package_directory,
+            package, package_problems,
+            include_stale_dependencies=include_stale_dependencies)
+
+    write_package_peerDependencies(package_directory, package)
+    write_package_versions(package_directory, package)
+    print_added_peerDependencies(package_directory, package)
     print_stale_dependencies(package)
-    overwrite_package()
+    overwrite_package(package_directory)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except typer.Exit:
+        pass
