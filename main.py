@@ -1,4 +1,4 @@
-from get_project_root import get_project_root
+# from get_project_root import get_project_root
 from datetime import datetime, timezone, timedelta
 from InquirerPy import inquirer
 import json
@@ -9,6 +9,16 @@ from rich.console import Console
 import shutil
 import subprocess
 import typer
+
+def get_project_root():
+    for parent_path in pathlib.Path(__file__).resolve().parents:
+        if (parent_path / ".gitlab-ci.yml").exists():
+            project_root: pathlib.PosixPath = parent_path
+            return project_root
+    raise FileNotFoundError("""
+        Outside of scope for finding a project root.
+        No `.gitlab-ci.yml` found while traversing up directory tree.
+    """)
 
 console = Console()
 app = typer.Typer()
