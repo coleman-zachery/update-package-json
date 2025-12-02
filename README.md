@@ -1,4 +1,4 @@
-# npm-latest-peerDependencies
+# update-package-json
 - Finds all your package dependencies.
 - Fetches all dependency stable versions and defaults to latest stable version for each dependency.
 - Finds missing required peerDependencies and adds them to package.
