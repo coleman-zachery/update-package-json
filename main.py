@@ -138,7 +138,7 @@ def print_stale_dependencies(package):
 # region . overwrite_package
 def overwrite_package(package_directory: pathlib.PosixPath):
     overwrite = inquirer.confirm(
-        message="Do you want to overwrite and update versions to {package_path}?",
+        message=f"Do you want to overwrite and update versions to {package_path}?",
         default=False,
     ).execute()
     if overwrite:
