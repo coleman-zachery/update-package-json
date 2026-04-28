@@ -1,0 +1,223 @@
+.ws-textarea {
+  --ws-padding-x: 12px;
+  --ws-padding-y: 12px;
+  --ws-marker-gap: 10px;
+  --ws-right-gutter: 18px;
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 200px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.ws-textarea:focus-within {
+  border-color: var(--border-accent);
+}
+
+.ws-codemirror {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  flex: 1;
+}
+
+.ws-textarea .cm-editor {
+  height: 100%;
+  background: transparent;
+  color: var(--text-primary);
+}
+
+.ws-textarea .cm-editor.cm-focused {
+  outline: none;
+}
+
+.ws-textarea .cm-scroller {
+  height: 100%;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.ws-textarea .cm-content,
+.ws-textarea .cm-scroller,
+.ws-textarea .cm-line {
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0, 'calt' 0;
+}
+
+.ws-textarea .cm-content {
+  min-height: 100%;
+  min-width: 100%;
+  width: max-content;
+  padding:
+    var(--ws-padding-y)
+    calc(var(--ws-padding-x) + var(--ws-right-gutter))
+    calc(var(--ws-padding-y) + 8px)
+    var(--ws-padding-x);
+  caret-color: var(--text-primary);
+}
+
+.ws-textarea .cm-line {
+  padding: 0;
+}
+
+.ws-textarea__placeholder {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  padding:
+    var(--ws-padding-y)
+    calc(var(--ws-padding-x) + var(--ws-right-gutter))
+    calc(var(--ws-padding-y) + 8px)
+    var(--ws-padding-x);
+  color: var(--text-placeholder);
+  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0, 'calt' 0;
+  white-space: pre-wrap;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ws-textarea .cm-selectionBackground,
+.ws-textarea .cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground {
+  background: var(--selection) !important;
+}
+
+.ws-textarea .cm-cursorLayer {
+  pointer-events: none;
+}
+
+.ws-textarea .cm-cursor,
+.ws-textarea .cm-dropCursor {
+  margin-left: -0.6px;
+  border-left: 1.2px solid var(--text-primary);
+  pointer-events: none;
+}
+
+.ws-textarea .cm-cursor {
+  display: none;
+}
+
+.ws-textarea .cm-focused > .cm-scroller > .cm-cursorLayer {
+  animation: steps(1) ws-cursor-blink 1.2s infinite;
+}
+
+.ws-textarea .cm-focused > .cm-scroller > .cm-cursorLayer .cm-cursor {
+  display: block;
+}
+
+.ws-textarea .cm-content ::selection,
+.ws-textarea .cm-line ::selection {
+  background: transparent !important;
+}
+
+.ws-textarea .cm-highlightSpace,
+.ws-textarea .cm-highlightTab {
+  color: var(--glyph);
+  opacity: 0.65;
+}
+
+.ws-textarea .cm-stale-dependency-version {
+  color: var(--danger);
+}
+
+.ws-textarea .cm-highlightSpace {
+  background-image: radial-gradient(circle at 50% 56%, var(--glyph) 8%, transparent 10%);
+  background-size: 1ch 1.6em;
+  background-position: center;
+  background-repeat: repeat-x;
+  opacity: 0.55;
+}
+
+.cm-line-marker-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ws-marker-gap);
+  margin-left: var(--ws-marker-gap);
+  vertical-align: middle;
+  pointer-events: auto;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ws-marker {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  transform: translateY(-1px);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ws-marker__checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  display: grid;
+  place-items: center;
+  border: 2px solid #7d7d86;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: border-color 0.12s ease, background-color 0.12s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.ws-marker__checkbox::after {
+  content: '';
+  width: 4px;
+  height: 7px;
+  border: solid #ffffff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) scale(0);
+  transform-origin: center;
+  transition: transform 0.12s ease;
+}
+
+.ws-marker__checkbox:checked {
+  background: var(--warning);
+  border-color: var(--border-warn);
+}
+
+.ws-marker__checkbox:checked::after {
+  transform: rotate(45deg) scale(1);
+}
+
+.ws-marker__checkbox:hover {
+  border-color: var(--warning-meta);
+}
+
+.ws-marker__checkbox:focus-visible {
+  outline: 2px solid var(--warning-soft);
+  outline-offset: 1px;
+}
+
+@keyframes ws-cursor-blink {
+  0% {
+    opacity: 1;
+  }
+
+  50% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}

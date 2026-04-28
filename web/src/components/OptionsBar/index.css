@@ -1,0 +1,122 @@
+.options-bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 10px 20px;
+  background: var(--bg-toolbar);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.options-bar__toggles {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.options-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 170px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px solid #6f647f;
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-variant-ligatures: none;
+  font-feature-settings: 'liga' 0, 'calt' 0;
+}
+
+.options-toggle:hover:not(:disabled) {
+  border-color: #83779a;
+  background: var(--bg-panel-hover);
+}
+
+.options-toggle:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.options-toggle__label {
+  color: #cec8d7;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+
+.options-toggle__meta {
+  color: #aba2ba;
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.options-toggle--engine {
+  min-width: 200px;
+}
+
+.options-toggle--warning {
+  background: var(--bg-panel-warn);
+  border-color: var(--border-warn);
+}
+
+.options-toggle--warning .options-toggle__label {
+  color: var(--warning-soft);
+}
+
+.options-toggle--warning .options-toggle__meta {
+  color: var(--warning-meta);
+}
+
+.options-toggle--warning:hover:not(:disabled) {
+  background: #3a270a;
+  border-color: #d28718;
+}
+
+.options-toggle--danger {
+  background: var(--bg-danger);
+  border-color: var(--border-danger);
+}
+
+.options-toggle--danger .options-toggle__label {
+  color: #ffd6d9;
+}
+
+.options-toggle--danger .options-toggle__meta {
+  color: var(--danger);
+}
+
+.options-toggle--danger:hover:not(:disabled) {
+  background: #42161a;
+  border-color: #a7323a;
+}
+
+.options-toggle--active {
+  background: var(--bg-panel-active);
+  border-color: var(--border-accent);
+}
+
+.options-toggle--active .options-toggle__label {
+  color: var(--text-primary);
+}
+
+.options-toggle--active .options-toggle__meta {
+  color: var(--accent-soft);
+}
+
+.options-toggle--active:hover:not(:disabled) {
+  background: var(--bg-panel-active-hover);
+  border-color: var(--accent);
+}
+
+@media (max-width: 900px) {
+  .options-toggle,
+  .options-toggle--engine {
+    min-width: 0;
+    flex: 1 1 220px;
+  }
+}

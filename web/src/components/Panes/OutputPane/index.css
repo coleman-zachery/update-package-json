@@ -1,0 +1,47 @@
+.output-pane {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.output-pane__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.output-pane__button {
+  padding: 4px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.output-pane__button:hover:not(:disabled) {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+
+.output-pane__button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.output-pane__button--danger {
+  color: var(--danger) !important;
+}
+
+.output-pane__button--danger:hover:not(:disabled) {
+  border-color: var(--border-danger);
+  color: var(--danger) !important;
+}
+
+.output-pane__button--danger:disabled {
+  color: color-mix(in srgb, var(--danger) 55%, var(--text-dim));
+}
