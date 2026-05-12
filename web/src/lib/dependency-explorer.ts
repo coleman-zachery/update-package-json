@@ -89,7 +89,13 @@ function buildDependencyEntry(
   optional: boolean,
   packageVersion: string,
 ): DependencyExplorerDependencyEntry {
-  const compactRange = formatCompactSemverRange(range)
+  const compactRange = (() => {
+    try {
+      return formatCompactSemverRange(range)
+    } catch {
+      return range
+    }
+  })()
   const matchesPackageVersion = semver.valid(range) === packageVersion
 
   return {

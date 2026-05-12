@@ -26,7 +26,11 @@ function incrementPatch(version: semver.SemVer): semver.SemVer {
   return new semver.SemVer(`${version.major}.${version.minor}.${version.patch + 1}`)
 }
 
-function normalizeComparatorVersion(version: semver.SemVer): semver.SemVer {
+function normalizeComparatorVersion(version: semver.SemVer | null | undefined): semver.SemVer | null {
+  if (!version) {
+    return null
+  }
+
   if (version.prerelease.length === 0) {
     return version
   }
