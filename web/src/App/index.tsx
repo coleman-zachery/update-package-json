@@ -1,10 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppHeader } from '@/components/AppHeader'
+import { DependencyExplorer } from '@/components/DependencyExplorer'
 import { OptionsBar, type EngineControlButton, type OptionControlButton } from '@/components/OptionsBar'
 import { ChangesPane } from '@/components/Panes/ChangesPane'
 import { EditorPane } from '@/components/Panes/EditorPane'
 import { OutputPane } from '@/components/Panes/OutputPane'
-import { detectSupportedSpaceIndentSize, type SpaceIndentSize } from '@/lib/indentation'
+import {
+  createSpaceIndentStyle,
+  detectSupportedSpaceIndentSize,
+  type SpaceIndentSize,
+} from '@/lib/indentation'
 import type {
   EngineName,
   ResolveOptions,
@@ -17,7 +22,9 @@ import {
   parsePackageJson,
   reformatPackageJson,
   removeDependencyOverrides,
+  serializePackageJson,
   setDependencyFrozen,
+  upsertDependencyValue,
   upsertEngineValue,
   upsertNpmSupport,
 } from '@/lib/package-json'
@@ -42,6 +49,7 @@ import { useLatestVersions } from '@/App/useLatestVersions'
 import './index.css'
 
 type PendingAction = 'update' | 'apply-fixes'
+const MAX_APPLY_FIXES_PASSES = 8
 
 export default function App() {
   const [input, setInput] = useState('')
@@ -74,6 +82,16 @@ export default function App() {
       return { node: '', npm: '' }
     }
   }, [input])
+
+  const outputJson = useMemo(() => {
+    if (!result) {
+      return ''
+    }
+
+    return serializePackageJson(result.updatedPackage, createSpaceIndentStyle(spaceIndentSize), {
+      packageManagerBeforeEngines: true,
+    })
+  }, [result, spaceIndentSize])
 
   const restrictableEntries = useMemo(() => detectRestrictableEntries(input), [input])
 
@@ -136,16 +154,57 @@ export default function App() {
       return
     }
 
-    const nextInput = buildApplyFixesInput(result, spaceIndentSize)
-    const nextRestrictions = syncRestrictions(
-      restrictions,
-      nextInput,
-      detectRestrictableEntries(nextInput),
-    )
+    setPendingAction('apply-fixes')
+    setForcedOverrideNames([])
+    setStatus('loading')
+    setResult(null)
+    setErrorMsg('')
 
-    setInput(nextInput)
-    setRestrictions(nextRestrictions)
-    await runUpdatePackage(nextInput, nextRestrictions, 'apply-fixes')
+    try {
+      const { resolvePackageJson } = await loadResolverModule()
+      let workingInput = input
+      let workingRestrictions = restrictions
+      let workingResult = result
+      const seenStates = new Set<string>()
+
+      for (let pass = 0; pass < MAX_APPLY_FIXES_PASSES; pass++) {
+        if (workingResult.fixRecommendations.length === 0) {
+          break
+        }
+
+        const nextInput = buildApplyFixesInput(workingResult, spaceIndentSize)
+        const nextRestrictions = syncRestrictions(
+          workingRestrictions,
+          nextInput,
+          detectRestrictableEntries(nextInput),
+        )
+        const stateKey = JSON.stringify({
+          input: nextInput,
+          restrictions: Object.entries(nextRestrictions).sort(([left], [right]) => left.localeCompare(right)),
+        })
+
+        if (seenStates.has(stateKey)) {
+          workingInput = nextInput
+          workingRestrictions = nextRestrictions
+          break
+        }
+
+        seenStates.add(stateKey)
+        workingInput = nextInput
+        workingRestrictions = nextRestrictions
+        workingResult = await resolvePackageJson(workingInput, options, workingRestrictions)
+      }
+
+      setInput(workingInput)
+      setRestrictions(workingRestrictions)
+      setResult(workingResult)
+      setStatus('done')
+    } catch (error) {
+      setErrorMsg(error instanceof Error ? error.message : String(error))
+      setStatus('error')
+    } finally {
+      setPendingAction(null)
+    }
   }
 
   function handleUseOutputAsInput(nextInput: string) {
@@ -249,6 +308,91 @@ export default function App() {
     const nextSpaceIndentSize: SpaceIndentSize = spaceIndentSize === 2 ? 4 : 2
     setSpaceIndentSize(nextSpaceIndentSize)
     setInput(current => reformatPackageJson(current, nextSpaceIndentSize))
+  }
+
+  const explorerContext = useMemo(() => {
+    if (status === 'done' && result) {
+      return {
+        pkg: result.updatedPackage,
+        raw: outputJson,
+        sourceLabel: 'Updated output package.json',
+        canApply: pendingEngine === null,
+        applyDisabledReason: '',
+      }
+    }
+
+    if (!input.trim()) {
+      return {
+        pkg: {},
+        raw: '',
+        sourceLabel: 'Input package.json',
+        canApply: status !== 'loading' && pendingEngine === null,
+        applyDisabledReason: '',
+      }
+    }
+
+    try {
+      return {
+        pkg: parsePackageJson(input),
+        raw: input,
+        sourceLabel: 'Input package.json',
+        canApply: status !== 'loading' && pendingEngine === null,
+        applyDisabledReason: '',
+      }
+    } catch {
+      return {
+        pkg: {},
+        raw: '',
+        sourceLabel: 'Input package.json',
+        canApply: false,
+        applyDisabledReason: 'Fix the input JSON first so the new dependency has somewhere safe to land.',
+      }
+    }
+  }, [input, outputJson, pendingEngine, result, status])
+
+  async function handleApplyDependencyVersion(
+    packageName: string,
+    versionSpec: string,
+    freeze: boolean,
+  ) {
+    const inputPackage = input.trim() ? parsePackageJson(input) : {}
+    const preferredSection =
+      inputPackage.dependencies?.[packageName] ? 'dependencies'
+        : inputPackage.devDependencies?.[packageName] ? 'devDependencies'
+          : inputPackage.peerDependencies?.[packageName] ? 'peerDependencies'
+            : inputPackage.optionalDependencies?.[packageName] ? 'optionalDependencies'
+              : 'dependencies'
+
+    const withDependency = upsertDependencyValue(
+      input,
+      packageName,
+      versionSpec,
+      spaceIndentSize,
+      preferredSection,
+    )
+    const nextInput = setDependencyFrozen(
+      withDependency,
+      packageName,
+      freeze,
+      spaceIndentSize,
+      preferredSection,
+    )
+
+    const nextRestrictions = syncRestrictions(
+      restrictions,
+      nextInput,
+      detectRestrictableEntries(nextInput),
+    )
+
+    setInput(nextInput)
+    setRestrictions(nextRestrictions)
+    setForcedOverrideNames([])
+    setResult(null)
+    setStatus('idle')
+
+    if (errorMsg) {
+      setErrorMsg('')
+    }
   }
 
   function handleForceOverrides() {
@@ -465,7 +609,17 @@ export default function App() {
 
   return (
     <div className="app">
-      <AppHeader />
+      <AppHeader
+        utility={(
+          <DependencyExplorer
+            contextPackage={explorerContext.pkg}
+            contextSourceLabel={explorerContext.sourceLabel}
+            canApply={explorerContext.canApply}
+            applyDisabledReason={explorerContext.applyDisabledReason}
+            onApplyVersion={handleApplyDependencyVersion}
+          />
+        )}
+      />
 
       <OptionsBar
         engineButtons={engineButtons}
@@ -503,6 +657,7 @@ export default function App() {
         <div className="app__column">
           <OutputPane
             result={result}
+            outputJson={outputJson}
             onForceOverrides={handleForceOverrides}
             onUseAsInput={handleUseOutputAsInput}
             forcedOverrideNames={forcedOverrideNames}

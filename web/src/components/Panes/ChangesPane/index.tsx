@@ -69,7 +69,11 @@ export function ChangesPane({
     }
   }, [result, status])
 
-  const showApplyFixes = Boolean(result && status === 'done' && result.auditStatus.state !== 'pass')
+  const showApplyFixes = Boolean(
+    result
+    && status === 'done'
+    && result.fixRecommendations.length > 0,
+  )
   const applyFixesButtonClassName = result?.auditStatus.state === 'failure'
     ? 'changes-pane__button changes-pane__button--danger'
     : 'changes-pane__button changes-pane__button--warn'
@@ -115,6 +119,17 @@ export function ChangesPane({
           <section className="summary-section summary-section--success">
             <h3>No Changes</h3>
             <p className="audit-summary__meta">All dependencies are already up to date.</p>
+          </section>
+        ) : null}
+
+        {result.fixRecommendations.length > 0 ? (
+          <section className="summary-section summary-section--warn">
+            <h3>Recommended fixes</h3>
+            <ul>
+              {result.fixRecommendations.map((recommendation, index) => (
+                <li key={index}>{recommendation}</li>
+              ))}
+            </ul>
           </section>
         ) : null}
 

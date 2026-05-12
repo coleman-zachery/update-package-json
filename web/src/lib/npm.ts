@@ -4,6 +4,7 @@ import { isStable, newestStable } from '@/lib/semver-utils'
 export interface VersionManifest {
   version: string
   dependencies?: Record<string, string>
+  optionalDependencies?: Record<string, string>
   peerDependencies?: Record<string, string>
   peerDependenciesMeta?: Record<string, { optional?: boolean }>
   devDependencies?: Record<string, string>

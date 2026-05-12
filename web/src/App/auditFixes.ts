@@ -8,7 +8,7 @@ export function buildApplyFixesInput(
 ): string {
   const nextPackage = removeDependencyOverrides(
     result.updatedPackage,
-    result.auditStatus.recommendedUnfreezeNames,
+    result.recommendedUnfreezeNames,
   )
 
   return serializePackageJson(nextPackage, createSpaceIndentStyle(spaceIndentSize), {

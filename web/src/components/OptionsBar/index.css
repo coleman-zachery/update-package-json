@@ -14,6 +14,15 @@
   flex: 1;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: stretch;
+}
+
+.options-bar__utility {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: max-content;
 }
 
 .options-toggle {
@@ -118,5 +127,11 @@
   .options-toggle--engine {
     min-width: 0;
     flex: 1 1 220px;
+  }
+
+  .options-bar__utility {
+    margin-left: 0;
+    width: 100%;
+    justify-content: flex-end;
   }
 }

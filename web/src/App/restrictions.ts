@@ -1,5 +1,5 @@
 import type { RootDependencySection } from '@/lib/package-json'
-import { detectFrozenDependencyNames } from '@/lib/package-json'
+import { detectFrozenDependencyNames, parsePackageJson } from '@/lib/package-json'
 import {
   ENGINE_NPM_RESTRICTION_KEY,
   PACKAGE_MANAGER_NPM_RESTRICTION_KEY,
@@ -12,12 +12,15 @@ export function syncRestrictions(
   input: string,
   restrictableEntries: RestrictableEntry[],
 ): Record<string, boolean> {
+  const defaultStrictEngineRestriction = detectDefaultStrictEngineRestriction(input)
   const frozenDependencyNames = detectFrozenDependencyNames(input)
   const hasDetachedPackageManagerEntry = restrictableEntries.some(
     entry => entry.key === PACKAGE_MANAGER_NPM_RESTRICTION_KEY,
   )
   const combinedNpmRestriction = Boolean(
-    current[ENGINE_NPM_RESTRICTION_KEY] || current[PACKAGE_MANAGER_NPM_RESTRICTION_KEY],
+    current[ENGINE_NPM_RESTRICTION_KEY]
+    || current[PACKAGE_MANAGER_NPM_RESTRICTION_KEY]
+    || defaultStrictEngineRestriction,
   )
 
   const next = Object.fromEntries(
@@ -26,10 +29,10 @@ export function syncRestrictions(
       isDependencyRestrictionSection(entry.section)
         ? frozenDependencyNames.has(entry.name)
         : entry.key === PACKAGE_MANAGER_NPM_RESTRICTION_KEY
-          ? current[PACKAGE_MANAGER_NPM_RESTRICTION_KEY] ?? current[ENGINE_NPM_RESTRICTION_KEY] ?? false
+          ? current[PACKAGE_MANAGER_NPM_RESTRICTION_KEY] ?? current[ENGINE_NPM_RESTRICTION_KEY] ?? defaultStrictEngineRestriction
           : entry.key === ENGINE_NPM_RESTRICTION_KEY && !hasDetachedPackageManagerEntry
             ? combinedNpmRestriction
-            : current[entry.key] ?? false,
+            : current[entry.key] ?? defaultStrictEngineRestriction,
     ]),
   )
 
@@ -40,6 +43,19 @@ export function syncRestrictions(
   }
 
   return next
+}
+
+function detectDefaultStrictEngineRestriction(input: string): boolean {
+  if (!input.trim()) {
+    return false
+  }
+
+  try {
+    const pkg = parsePackageJson(input)
+    return pkg.engineStrict === true
+  } catch {
+    return false
+  }
 }
 
 export function getPreferredFrozenSection(

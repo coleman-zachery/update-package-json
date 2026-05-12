@@ -13,12 +13,26 @@
 }
 
 .app-header__title {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.app-header__title-link {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  font-size: 1.1rem;
-  font-weight: 600;
   color: var(--accent);
+  text-decoration: none;
+  text-underline-offset: 0.16em;
+}
+
+.app-header__title-link:hover {
+  text-decoration: underline;
+}
+
+.app-header__title-link-arrow {
+  font-size: 0.86em;
+  line-height: 1;
 }
 
 .app-header__glyph {
@@ -48,22 +62,8 @@
   color: var(--text-secondary);
 }
 
-.app-header__link {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--bg-panel);
-  color: var(--text-primary);
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-.app-header__link:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-panel-hover);
+.app-header__utility {
+  flex-shrink: 0;
 }
 
 @media (max-width: 720px) {

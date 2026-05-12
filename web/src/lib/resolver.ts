@@ -33,6 +33,7 @@ import {
   newestSatisfying,
   isEngineCompatible,
 } from '@/lib/semver-utils'
+import { formatCompactSemverRange } from '@/lib/semver-display'
 
 export interface ResolveOptions {
   respectEnginesNode: boolean
@@ -68,6 +69,8 @@ export interface ResolveResult {
   conflicts: string[]
   engineWarnings: string[]
   engineOverrides: string[]
+  recommendedUnfreezeNames: string[]
+  fixRecommendations: string[]
 }
 
 export interface EngineValidationIssue {
@@ -331,6 +334,7 @@ interface PackageState {
   currentVersion: string
   manifest: VersionManifest
   peerDependencies: Record<string, { range: string; optional: boolean }>
+  transitiveOverridePlans: Record<string, Record<string, string>>
 }
 
 interface UnresolvedPeerRequest {
@@ -349,6 +353,15 @@ interface ResolutionPass {
   engineWarnings: string[]
   staleDependencyNames: string[]
   resolvedManifests: ResolvedManifest[]
+  transitiveOverrides: Array<{ name: string; version: string; source: string }>
+  transitiveOverrideWarnings: string[]
+  recommendedUnfreezeNames: string[]
+  fixRecommendations: string[]
+}
+
+interface CandidateVersionAnalysis {
+  dependencyCompatibleCandidates: string[]
+  overrideCompatibleCandidates: string[]
 }
 
 function normalizeResolvedVersion(range: string): string {
@@ -396,6 +409,20 @@ function getPreferredResolvedVersion(
   }
 
   return sortedVersions[getPreferredCandidateIndex(sortedVersions, avoidLatestVersions)]
+}
+
+function getDependencyRangeCandidates(range: string, versions: string[]): string[] {
+  const stableMatches = filterStable(versions)
+    .sort((left, right) => semver.rcompare(left, right))
+    .filter(version => semver.satisfies(version, range))
+
+  if (stableMatches.length > 0) {
+    return stableMatches
+  }
+
+  return [...versions]
+    .sort((left, right) => semver.rcompare(left, right))
+    .filter(version => semver.satisfies(version, range, { includePrerelease: true }))
 }
 
 function getRequiredPeerDependencies(
@@ -473,6 +500,14 @@ async function resolveWithEngines(
   const states = new Map<string, PackageState>()
   const unresolvedPeerRequests = new Map<string, UnresolvedPeerRequest>()
   const packumentCache = new Map<string, Awaited<ReturnType<typeof fetchPackument>>>()
+  const installTargetCache = new Map<string, {
+    latestSatisfyingVersion: string | null
+    latestEngineCompatibleVersion: string | null
+    latestSatisfyingIsEngineCompatible: boolean
+  }>()
+  const shouldAutoTransitiveEngineOverrides = pkg.engineStrict === true
+  const recommendedUnfreezeNames = new Set<string>()
+  const fixRecommendations = new Set<string>()
 
   async function getPackumentCached(name: string) {
     const cached = packumentCache.get(name)
@@ -485,6 +520,103 @@ async function resolveWithEngines(
 
   function getSortedStableVersions(packument: Awaited<ReturnType<typeof fetchPackument>>): string[] {
     return getPreferredStableVersions(packument)
+  }
+
+  function recommendUnfreeze(name: string, reason: string) {
+    recommendedUnfreezeNames.add(name)
+    fixRecommendations.add(`Remove the override/freeze for ${name}: ${reason}`)
+  }
+
+  async function getInstallTargetAnalysis(
+    dependencyName: string,
+    dependencyRange: string,
+  ): Promise<{
+    latestSatisfyingVersion: string | null
+    latestEngineCompatibleVersion: string | null
+    latestSatisfyingIsEngineCompatible: boolean
+  }> {
+    if (!semver.validRange(dependencyRange)) {
+      return {
+        latestSatisfyingVersion: null,
+        latestEngineCompatibleVersion: null,
+        latestSatisfyingIsEngineCompatible: true,
+      }
+    }
+
+    const cacheKey = [
+      dependencyName,
+      dependencyRange,
+      rootNode ?? '',
+      rootNpm ?? '',
+      respectNode ? 'node' : '',
+      respectNpm ? 'npm' : '',
+    ].join('|')
+    const cached = installTargetCache.get(cacheKey)
+    if (cached) {
+      return cached
+    }
+
+    try {
+      const packument = await getPackumentCached(dependencyName)
+      const satisfyingVersions = getDependencyRangeCandidates(
+        dependencyRange,
+        getAllVersions(packument),
+      )
+      const latestSatisfyingVersion = satisfyingVersions[0] ?? null
+      const latestEngineCompatibleVersion = satisfyingVersions.find(version => {
+        const manifest = packument.versions[version]
+        return Boolean(
+          manifest
+          && isEngineCompatible(manifest.engines, rootNode, rootNpm, respectNode, respectNpm),
+        )
+      }) ?? null
+      const nextAnalysis = {
+        latestSatisfyingVersion,
+        latestEngineCompatibleVersion,
+        latestSatisfyingIsEngineCompatible: Boolean(
+          latestSatisfyingVersion
+          && latestSatisfyingVersion === latestEngineCompatibleVersion,
+        ),
+      }
+
+      installTargetCache.set(cacheKey, nextAnalysis)
+      return nextAnalysis
+    } catch {
+      const nextAnalysis = {
+        latestSatisfyingVersion: null,
+        latestEngineCompatibleVersion: null,
+        latestSatisfyingIsEngineCompatible: false,
+      }
+      installTargetCache.set(cacheKey, nextAnalysis)
+      return nextAnalysis
+    }
+  }
+
+  async function getTransitiveOverridePlan(
+    manifest: VersionManifest | undefined,
+  ): Promise<Record<string, string> | null> {
+    if (!manifest) {
+      return null
+    }
+
+    const dependencyEntries = [
+      ...Object.entries(manifest.dependencies ?? {}),
+      ...Object.entries(manifest.optionalDependencies ?? {}),
+    ]
+    const overrides: Record<string, string> = {}
+
+    for (const [dependencyName, dependencyRange] of dependencyEntries) {
+      const analysis = await getInstallTargetAnalysis(dependencyName, dependencyRange)
+      if (!analysis.latestSatisfyingVersion || !analysis.latestEngineCompatibleVersion) {
+        return null
+      }
+
+      if (!analysis.latestSatisfyingIsEngineCompatible) {
+        overrides[dependencyName] = analysis.latestEngineCompatibleVersion
+      }
+    }
+
+    return overrides
   }
 
   function recordUnresolvedPeerRequest(
@@ -512,16 +644,62 @@ async function resolveWithEngines(
     const packument = await getPackumentCached(name)
     const allStableVersions = getSortedStableVersions(packument)
     const latestVersion = allStableVersions[0]
-
-    let candidateVersions = allStableVersions
-    if (restrictedRange && semver.validRange(restrictedRange)) {
-      candidateVersions = candidateVersions.filter(version => semver.satisfies(version, restrictedRange))
-    }
-
-    candidateVersions = candidateVersions.filter(version => {
+    const engineCompatibleVersions = allStableVersions.filter(version => {
       const manifest = packument.versions[version]
       return isEngineCompatible(manifest?.engines, rootNode, rootNpm, respectNode, respectNpm)
     })
+    let candidateVersions = restrictedRange && semver.validRange(restrictedRange)
+      ? engineCompatibleVersions.filter(version => semver.satisfies(version, restrictedRange))
+      : engineCompatibleVersions
+
+    let noInstallableDependencyGraph = false
+    const transitiveOverridePlans: Record<string, Record<string, string>> = {}
+    let selectedViaTransitiveOverrideFallback = false
+
+    async function analyzeCandidateVersions(
+      versions: string[],
+      allowOverrideCompatible: boolean,
+    ): Promise<CandidateVersionAnalysis> {
+      const dependencyCompatibleCandidates: string[] = []
+      const overrideCompatibleCandidates: string[] = []
+
+      for (const version of versions) {
+        const manifest = packument.versions[version]
+        const overridePlan = await getTransitiveOverridePlan(manifest)
+        if (!overridePlan) {
+          continue
+        }
+
+        transitiveOverridePlans[version] = overridePlan
+        if (Object.keys(overridePlan).length === 0) {
+          dependencyCompatibleCandidates.push(version)
+        } else if (allowOverrideCompatible) {
+          overrideCompatibleCandidates.push(version)
+        }
+      }
+
+      return {
+        dependencyCompatibleCandidates,
+        overrideCompatibleCandidates,
+      }
+    }
+
+    if (candidateVersions.length > 0) {
+      const restrictedAnalysis = await analyzeCandidateVersions(
+        candidateVersions,
+        shouldAutoTransitiveEngineOverrides && root,
+      )
+
+      if (restrictedAnalysis.dependencyCompatibleCandidates.length > 0) {
+        candidateVersions = restrictedAnalysis.dependencyCompatibleCandidates
+      } else if (restrictedAnalysis.overrideCompatibleCandidates.length > 0) {
+        candidateVersions = restrictedAnalysis.overrideCompatibleCandidates
+        selectedViaTransitiveOverrideFallback = true
+      } else {
+        noInstallableDependencyGraph = true
+        candidateVersions = []
+      }
+    }
 
     const preferredCandidateIndex = getPreferredCandidateIndex(candidateVersions, options.avoidLatestVersions)
     let currentVersion: string | undefined = candidateVersions[preferredCandidateIndex]
@@ -538,13 +716,47 @@ async function resolveWithEngines(
         return null
       }
 
-      engineWarnings.push(`${name}: no compatible version found for engine constraints`)
+      let recommendedActionSuffix = ''
+      if (restrictedRange) {
+        recommendUnfreeze(
+          name,
+          noInstallableDependencyGraph
+            ? 'it is blocking versions whose direct dependency graph stays compatible with the current engine constraints'
+            : 'it is blocking versions compatible with the current engine constraints',
+        )
+        recommendedActionSuffix = ` Recommended fix: remove the override/freeze for ${name} and rerun Apply Fixes.`
+      }
+
+      engineWarnings.push(
+        `${noInstallableDependencyGraph
+          ? `${name}: no version found whose direct dependency ranges stay compatible with engine constraints`
+          : `${name}: no compatible version found for engine constraints`}${recommendedActionSuffix}`,
+      )
       candidateVersions = [currentVersion]
     }
 
     const manifest = packument.versions[currentVersion]
     if (!manifest) {
       return null
+    }
+
+    if (restrictedRange && root && selectedViaTransitiveOverrideFallback) {
+      const unrestrictedAnalysis = await analyzeCandidateVersions(engineCompatibleVersions, false)
+      if (unrestrictedAnalysis.dependencyCompatibleCandidates.length > 0) {
+        const overridePlan = transitiveOverridePlans[currentVersion] ?? {}
+        const transitiveNames = Object.keys(overridePlan).sort((left, right) => left.localeCompare(right))
+        const transitiveLabel = transitiveNames.length === 0
+          ? 'transitive engine overrides'
+          : transitiveNames.length === 1
+            ? `a transitive engine override for ${transitiveNames[0]}`
+            : `transitive engine overrides for ${transitiveNames.slice(0, 3).join(', ')}${transitiveNames.length > 3 ? ', ...' : ''}`
+        const frozenLabel = currentValue ? `"${currentValue}"` : `"${currentVersion}"`
+
+        recommendUnfreeze(
+          name,
+          `it is frozen to ${frozenLabel}, which requires ${transitiveLabel}; unfreezing lets the resolver choose a cleaner engine-compatible version`,
+        )
+      }
     }
 
     if (!candidateVersions.includes(currentVersion)) {
@@ -561,6 +773,7 @@ async function resolveWithEngines(
       currentVersion,
       manifest,
       peerDependencies: getRequiredPeerDependencies(manifest, options.addOptionalPeerDeps),
+      transitiveOverridePlans,
     }
   }
 
@@ -625,6 +838,12 @@ async function resolveWithEngines(
     state.currentIndex = candidateIndex >= 0 ? candidateIndex : state.currentIndex
     state.manifest = manifest
     state.peerDependencies = getRequiredPeerDependencies(manifest, options.addOptionalPeerDeps)
+    if (!(nextVersion in state.transitiveOverridePlans)) {
+      const overridePlan = await getTransitiveOverridePlan(manifest)
+      if (overridePlan) {
+        state.transitiveOverridePlans[nextVersion] = overridePlan
+      }
+    }
     return true
   }
 
@@ -843,8 +1062,20 @@ async function resolveWithEngines(
         }
       }
 
+      const recommendedConflictUnfreezes = [
+        isStateRestricted(peerConflict.dependent) ? peerConflict.dependent.name : null,
+        isStateRestricted(peerConflict.peer) ? peerConflict.peer.name : null,
+      ].filter((value): value is string => Boolean(value))
+
+      for (const name of recommendedConflictUnfreezes) {
+        recommendUnfreeze(
+          name,
+          `it is participating in the unresolved peer conflict between ${peerConflict.dependent.name} and ${peerConflict.peer.name}`,
+        )
+      }
+
       conflicts.push(
-        `${peerConflict.dependent.name}@${peerConflict.dependent.currentVersion} requires ${peerConflict.peer.name}@${peerConflict.requiredRange}, but resolved ${peerConflict.peer.name}@${peerConflict.peer.currentVersion}`
+        `${peerConflict.dependent.name}@${peerConflict.dependent.currentVersion} requires ${peerConflict.peer.name}@${formatCompactSemverRange(peerConflict.requiredRange)}, but resolved ${peerConflict.peer.name}@${peerConflict.peer.currentVersion}${recommendedConflictUnfreezes.length > 0 ? ` Recommended fix: remove the override/freeze for ${recommendedConflictUnfreezes.join(' or ')} and rerun Apply Fixes.` : ''}`
       )
       break
     }
@@ -1014,6 +1245,39 @@ async function resolveWithEngines(
     .map(state => state.name)
     .sort((left, right) => left.localeCompare(right))
 
+  const transitiveOverrideMap = new Map<string, { version: string; sources: Set<string> }>()
+  const transitiveOverrideWarnings: string[] = []
+
+  for (const state of states.values()) {
+    if (!state.root) {
+      continue
+    }
+
+    const overridePlan = state.transitiveOverridePlans[state.currentVersion] ?? {}
+    for (const [name, version] of Object.entries(overridePlan)) {
+      const existing = transitiveOverrideMap.get(name)
+      if (!existing) {
+        transitiveOverrideMap.set(name, { version, sources: new Set([state.name]) })
+        continue
+      }
+
+      existing.sources.add(state.name)
+      if (existing.version !== version) {
+        transitiveOverrideWarnings.push(
+          `Transitive override conflict for ${name}: ${Array.from(existing.sources).sort().join(', ')} require both ${existing.version} and ${version} under current engine constraints.`,
+        )
+      }
+    }
+  }
+
+  const transitiveOverrides = Array.from(transitiveOverrideMap.entries())
+    .map(([name, entry]) => ({
+      name,
+      version: entry.version,
+      source: Array.from(entry.sources).sort((left, right) => left.localeCompare(right)).join(', '),
+    }))
+    .sort((left, right) => left.name.localeCompare(right.name))
+
   return {
     deps,
     devDeps,
@@ -1028,6 +1292,10 @@ async function resolveWithEngines(
       version: state.currentVersion,
       manifest: state.manifest,
     })),
+    transitiveOverrides,
+    transitiveOverrideWarnings,
+    recommendedUnfreezeNames: Array.from(recommendedUnfreezeNames).sort((left, right) => left.localeCompare(right)),
+    fixRecommendations: Array.from(fixRecommendations).sort((left, right) => left.localeCompare(right)),
   }
 }
 
@@ -1181,6 +1449,36 @@ export async function resolvePackageJson(
     updated.packageManager = formattedPackageManager
   }
 
+  const recommendedUnfreezeNames = Array.from(new Set([
+    ...resolution.recommendedUnfreezeNames,
+    ...resolution.auditStatus.recommendedUnfreezeNames,
+  ])).sort((left, right) => left.localeCompare(right))
+
+  const fixRecommendations = [
+    ...resolution.fixRecommendations,
+    ...resolution.auditStatus.recommendedUnfreezeNames.map(name =>
+      `Remove the override/freeze for ${name}: it is blocking an available audit-safe version.`,
+    ),
+  ].sort((left, right) => left.localeCompare(right))
+
+  if (resolution.transitiveOverrides.length > 0) {
+    const nextOverrides = { ...(updated.overrides ?? {}) }
+    let overridesChanged = !updated.overrides
+
+    for (const override of resolution.transitiveOverrides) {
+      if (nextOverrides[override.name] === override.version) {
+        continue
+      }
+
+      nextOverrides[override.name] = override.version
+      overridesChanged = true
+    }
+
+    if (overridesChanged) {
+      updated.overrides = sortOverrideEntries(nextOverrides)
+    }
+  }
+
   const stringOverrides = getStringOverrides(updated)
   if (Object.keys(stringOverrides).length > 0) {
     const nextOverrides = { ...(updated.overrides ?? {}) }
@@ -1208,12 +1506,23 @@ export async function resolvePackageJson(
     changes,
     addedPeerDeps: resolution.addedPeerDeps,
     conflicts: resolution.conflicts,
-    engineWarnings: [...engineWarnings, ...resolution.engineWarnings].filter(message => {
+    engineWarnings: [
+      ...engineWarnings,
+      ...resolution.engineWarnings,
+      ...resolution.transitiveOverrideWarnings,
+    ].filter(message => {
       if (message.startsWith('engines.node ') && overriddenEngines.has('node')) return false
       if (message.startsWith('engines.npm ') && overriddenEngines.has('npm')) return false
       if (message.startsWith('packageManager ') && didOverrideNpm && declaredNpmSource === 'packageManager') return false
       return true
     }),
-    engineOverrides,
+    engineOverrides: [
+      ...engineOverrides,
+      ...resolution.transitiveOverrides.map(override =>
+        `${override.source}: pinned transitive ${override.name}@${override.version} in overrides to satisfy engine constraints`,
+      ),
+    ],
+    recommendedUnfreezeNames,
+    fixRecommendations,
   }
 }

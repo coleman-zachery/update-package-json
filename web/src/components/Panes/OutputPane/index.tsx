@@ -1,14 +1,14 @@
-import { useMemo } from 'react'
 import { PaneState } from '@/components/PaneState'
 import { PaneHeader } from '@/components/Panes/PaneHeader'
 import { WhitespaceTextarea } from '@/components/WhitespaceTextarea'
-import { createSpaceIndentStyle, type SpaceIndentSize } from '@/lib/indentation'
-import { getStringOverrides, serializePackageJson } from '@/lib/package-json'
+import type { SpaceIndentSize } from '@/lib/indentation'
+import { getStringOverrides } from '@/lib/package-json'
 import type { ResolveResult } from '@/lib/resolver'
 import './index.css'
 
 interface Props {
   result: ResolveResult | null
+  outputJson: string
   onForceOverrides: () => void
   onUseAsInput: (value: string) => void
   forcedOverrideNames: string[]
@@ -18,30 +18,21 @@ interface Props {
 
 export function OutputPane({
   result,
+  outputJson,
   onForceOverrides,
   onUseAsInput,
   forcedOverrideNames,
   spaceIndentSize,
   status,
 }: Props) {
-  const outputJson = useMemo(() => {
-    if (!result) {
-      return ''
-    }
-
-    return serializePackageJson(result.updatedPackage, createSpaceIndentStyle(spaceIndentSize), {
-      packageManagerBeforeEngines: true,
-    })
-  }, [result, spaceIndentSize])
-
-  const pendingOverrideNames = useMemo(() => {
+  const pendingOverrideNames = (() => {
     if (!result) {
       return []
     }
 
     const overrideNames = new Set(Object.keys(getStringOverrides(result.updatedPackage)))
     return result.staleDependencyNames.filter(name => !overrideNames.has(name))
-  }, [result])
+  })()
 
   function handleCopy() {
     if (result) {

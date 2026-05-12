@@ -42,7 +42,8 @@ export function createChangeSummary(result: ResolveResult): ChangeSummary {
       result.addedPeerDeps.length > 0 ||
       result.conflicts.length > 0 ||
       result.engineWarnings.length > 0 ||
-      result.engineOverrides.length > 0,
+      result.engineOverrides.length > 0 ||
+      result.fixRecommendations.length > 0,
     engineChanges: result.changes.filter(change => change.section === 'engines'),
     dependencyChanges: result.changes.filter(change => change.section !== 'engines' && change.from !== '(none)'),
     addedDependenciesBySection: {

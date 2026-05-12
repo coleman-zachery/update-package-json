@@ -231,6 +231,36 @@ export function getDependencyVersion(pkg: PackageJson, name: string): string | u
   return undefined
 }
 
+export function upsertDependencyValue(
+  raw: string,
+  name: string,
+  value: string,
+  spaceIndentSize?: SpaceIndentSize,
+  preferredSection?: RootDependencySection,
+): string {
+  const pkg = raw.trim() ? parsePackageJson(raw) : {}
+  const updated = clonePackageJsonForMutation(pkg)
+
+  ensureDependencyValue(updated, pkg, name, value, preferredSection)
+
+  for (const section of ROOT_DEPENDENCY_SECTIONS) {
+    const sectionValues = getDependencySectionValues(updated, section)
+    if (sectionValues) {
+      updated[section] = sortDependencies(sectionValues)
+    }
+  }
+
+  if (isPlainObject(updated.overrides) && typeof updated.overrides[name] === 'string') {
+    updated.overrides = sortObjectEntries({
+      ...updated.overrides,
+      [name]: value,
+    })
+  }
+
+  cleanupEmptyDependencySections(updated)
+  return serializeMutatedPackage(raw, updated, spaceIndentSize)
+}
+
 function shouldPlacePackageManagerBeforeEngines(pkg: PackageJson): boolean {
   return typeof pkg.packageManager === 'string' && Boolean(pkg.engines)
 }

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { EngineName, ResolveOptions } from '@/lib/resolver'
 import './index.css'
 
@@ -25,6 +26,7 @@ export interface OptionControlButton {
 interface Props {
   engineButtons: EngineControlButton[]
   optionButtons: OptionControlButton[]
+  utility?: ReactNode
   onEngineClick: (engineName: EngineName) => void
   onOptionClick: (key: keyof ResolveOptions) => void
 }
@@ -32,6 +34,7 @@ interface Props {
 export function OptionsBar({
   engineButtons,
   optionButtons,
+  utility,
   onEngineClick,
   onOptionClick,
 }: Props) {
@@ -65,6 +68,12 @@ export function OptionsBar({
             <span className="options-toggle__meta">{button.meta}</span>
           </button>
         ))}
+
+        {utility ? (
+          <div className="options-bar__utility">
+            {utility}
+          </div>
+        ) : null}
       </div>
     </div>
   )
