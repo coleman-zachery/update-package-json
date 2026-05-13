@@ -231,6 +231,34 @@ export function getDependencyVersion(pkg: PackageJson, name: string): string | u
   return undefined
 }
 
+export function applyMajorBuildRanges(
+  pkg: PackageJson,
+  names: string[],
+): PackageJson {
+  if (names.length === 0) {
+    return pkg
+  }
+
+  const updated = clonePackageJsonForMutation(pkg)
+  let changed = false
+
+  for (const name of names) {
+    for (const section of ROOT_DEPENDENCY_SECTIONS) {
+      const sectionValues = getDependencySectionValues(updated, section)
+      const currentValue = sectionValues?.[name]
+
+      if (!sectionValues || !currentValue || !isPinnedNpmVersion(currentValue)) {
+        continue
+      }
+
+      sectionValues[name] = `^${currentValue}`
+      changed = true
+    }
+  }
+
+  return changed ? updated : pkg
+}
+
 export function upsertDependencyValue(
   raw: string,
   name: string,

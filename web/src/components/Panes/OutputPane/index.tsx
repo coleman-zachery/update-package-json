@@ -10,8 +10,10 @@ interface Props {
   result: ResolveResult | null
   outputJson: string
   onForceOverrides: () => void
+  onToggleMajorBuilds: () => void
   onUseAsInput: (value: string) => void
   forcedOverrideNames: string[]
+  majorBuildsActive: boolean
   spaceIndentSize: SpaceIndentSize
   status: 'idle' | 'loading' | 'done' | 'error'
 }
@@ -20,8 +22,10 @@ export function OutputPane({
   result,
   outputJson,
   onForceOverrides,
+  onToggleMajorBuilds,
   onUseAsInput,
   forcedOverrideNames,
+  majorBuildsActive,
   spaceIndentSize,
   status,
 }: Props) {
@@ -38,20 +42,6 @@ export function OutputPane({
     if (result) {
       navigator.clipboard.writeText(outputJson)
     }
-  }
-
-  function handleDownload() {
-    if (!result) {
-      return
-    }
-
-    const blob = new Blob([outputJson], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = 'package.json'
-    anchor.click()
-    URL.revokeObjectURL(url)
   }
 
   function handleUseAsInput() {
@@ -90,6 +80,8 @@ export function OutputPane({
   const forceOverridesActive = forcedOverrideNames.length > 0
   const forceOverridesDisabled = !result || status !== 'done' || (!forceOverridesActive && pendingOverrideNames.length === 0)
   const forceOverridesLabel = forceOverridesActive ? 'Undo Overrides' : 'Force Overrides'
+  const majorBuildNames = result?.latestDependencyNames ?? []
+  const majorBuildsDisabled = !result || status !== 'done' || (!majorBuildsActive && majorBuildNames.length === 0)
 
   return (
     <div className="output-pane">
@@ -107,6 +99,14 @@ export function OutputPane({
             </button>
             <button
               type="button"
+              className={`output-pane__button${majorBuildsActive ? ' output-pane__button--active' : ''}`}
+              onClick={onToggleMajorBuilds}
+              disabled={majorBuildsDisabled}
+            >
+              Major Builds
+            </button>
+            <button
+              type="button"
               className="output-pane__button"
               onClick={handleUseAsInput}
               disabled={outputActionsDisabled}
@@ -120,14 +120,6 @@ export function OutputPane({
               disabled={outputActionsDisabled}
             >
               Copy
-            </button>
-            <button
-              type="button"
-              className="output-pane__button"
-              onClick={handleDownload}
-              disabled={outputActionsDisabled}
-            >
-              Download
             </button>
           </div>
         )}

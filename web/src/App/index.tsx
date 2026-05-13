@@ -16,6 +16,7 @@ import type {
   ResolveResult,
 } from '@/lib/resolver'
 import {
+  applyMajorBuildRanges,
   forceDependenciesIntoOverrides,
   getStringOverrides,
   hasDependencyOverride,
@@ -62,6 +63,7 @@ export default function App() {
   const [restrictions, setRestrictions] = useState<Record<string, boolean>>({})
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [forcedOverrideNames, setForcedOverrideNames] = useState<string[]>([])
+  const [majorBuildsActive, setMajorBuildsActive] = useState(false)
   const pendingIndentAutoDetectRef = useRef(false)
 
   const latestVersions = useLatestVersions()
@@ -88,10 +90,14 @@ export default function App() {
       return ''
     }
 
-    return serializePackageJson(result.updatedPackage, createSpaceIndentStyle(spaceIndentSize), {
+    const outputPackage = majorBuildsActive
+      ? applyMajorBuildRanges(result.updatedPackage, result.latestDependencyNames)
+      : result.updatedPackage
+
+    return serializePackageJson(outputPackage, createSpaceIndentStyle(spaceIndentSize), {
       packageManagerBeforeEngines: true,
     })
-  }, [result, spaceIndentSize])
+  }, [majorBuildsActive, result, spaceIndentSize])
 
   const restrictableEntries = useMemo(() => detectRestrictableEntries(input), [input])
 
@@ -422,6 +428,10 @@ export default function App() {
     setForcedOverrideNames(nextForcedOverrideNames)
   }
 
+  function handleMajorBuildsToggle() {
+    setMajorBuildsActive(current => !current)
+  }
+
   function handleRestrictionToggle(entry: RestrictableEntry) {
     if (!isDependencyRestrictionSection(entry.section)) {
       setEngineFrozen(entry.name === 'node' ? 'node' : 'npm', !isEngineFrozen(entry.name === 'node' ? 'node' : 'npm'))
@@ -659,8 +669,10 @@ export default function App() {
             result={result}
             outputJson={outputJson}
             onForceOverrides={handleForceOverrides}
+            onToggleMajorBuilds={handleMajorBuildsToggle}
             onUseAsInput={handleUseOutputAsInput}
             forcedOverrideNames={forcedOverrideNames}
+            majorBuildsActive={majorBuildsActive}
             spaceIndentSize={spaceIndentSize}
             status={status}
           />

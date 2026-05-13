@@ -28,6 +28,17 @@
   color: var(--text-primary);
 }
 
+.output-pane__button--active {
+  background: var(--bg-panel-active);
+  border-color: var(--border-accent);
+  color: var(--text-primary);
+}
+
+.output-pane__button--active:hover:not(:disabled) {
+  background: var(--bg-panel-active-hover);
+  border-color: var(--accent);
+}
+
 .output-pane__button:disabled {
   opacity: 0.45;
   cursor: not-allowed;

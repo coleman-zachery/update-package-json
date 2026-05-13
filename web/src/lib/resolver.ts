@@ -63,6 +63,7 @@ export interface AddedPeerDep {
 export interface ResolveResult {
   updatedPackage: PackageJson
   auditStatus: AuditStatus
+  latestDependencyNames: string[]
   staleDependencyNames: string[]
   changes: VersionChange[]
   addedPeerDeps: AddedPeerDep[]
@@ -351,6 +352,7 @@ interface ResolutionPass {
   addedPeerDeps: AddedPeerDep[]
   conflicts: string[]
   engineWarnings: string[]
+  latestDependencyNames: string[]
   staleDependencyNames: string[]
   resolvedManifests: ResolvedManifest[]
   transitiveOverrides: Array<{ name: string; version: string; source: string }>
@@ -1244,6 +1246,10 @@ async function resolveWithEngines(
     .filter(state => state.latestVersion && state.currentVersion !== state.latestVersion)
     .map(state => state.name)
     .sort((left, right) => left.localeCompare(right))
+  const latestDependencyNames = Array.from(states.values())
+    .filter(state => state.latestVersion && state.currentVersion === state.latestVersion)
+    .map(state => state.name)
+    .sort((left, right) => left.localeCompare(right))
 
   const transitiveOverrideMap = new Map<string, { version: string; sources: Set<string> }>()
   const transitiveOverrideWarnings: string[] = []
@@ -1286,6 +1292,7 @@ async function resolveWithEngines(
     addedPeerDeps,
     conflicts,
     engineWarnings,
+    latestDependencyNames,
     staleDependencyNames,
     resolvedManifests: Array.from(states.values()).map(state => ({
       name: state.name,
@@ -1502,6 +1509,7 @@ export async function resolvePackageJson(
   return {
     updatedPackage: updated,
     auditStatus: resolution.auditStatus,
+    latestDependencyNames: resolution.latestDependencyNames,
     staleDependencyNames: resolution.staleDependencyNames,
     changes,
     addedPeerDeps: resolution.addedPeerDeps,
