@@ -93,11 +93,6 @@ export function getPreferredStableVersions(packument: Packument): string[] {
 
   const preferredVersions = sortedStableVersions.filter(version => !isDeprecatedVersion(packument.versions[version]))
   const deprecatedVersions = sortedStableVersions.filter(version => isDeprecatedVersion(packument.versions[version]))
-  const latest = getLatestVersion(packument)
-
-  if (preferredVersions.includes(latest)) {
-    return [latest, ...preferredVersions.filter(version => version !== latest), ...deprecatedVersions]
-  }
 
   return preferredVersions.length > 0 ? [...preferredVersions, ...deprecatedVersions] : deprecatedVersions
 }
@@ -142,7 +137,7 @@ export async function fetchLatestNodeVersion(): Promise<string> {
 
 export async function fetchLatestNpmVersion(): Promise<string> {
   const npmPackument = await fetchPackument('npm')
-  const latest = getLatestVersion(npmPackument) || newestStable(getAllVersions(npmPackument))
+  const latest = getPreferredStableVersions(npmPackument)[0] || newestStable(getAllVersions(npmPackument))
   if (!latest) throw new Error('Unable to determine the latest npm version')
   return latest
 }

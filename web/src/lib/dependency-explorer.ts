@@ -161,7 +161,7 @@ export async function inspectDependencyPackage(
 
   const packument = await fetchPackument(normalizedPackageName)
   const stableVersions = getPreferredStableVersions(packument)
-  const latestVersion = packument['dist-tags']?.latest ?? stableVersions[0] ?? ''
+  const latestVersion = stableVersions[0] ?? packument['dist-tags']?.latest ?? ''
   const rowsByKey = new Map<string, DependencyExplorerRow>()
   const dependencyColumns = new Set<string>()
 

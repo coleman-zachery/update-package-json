@@ -1,3 +1,4 @@
+import semver from 'semver'
 import { PaneState } from '@/components/PaneState'
 import { PaneHeader } from '@/components/Panes/PaneHeader'
 import { WhitespaceTextarea } from '@/components/WhitespaceTextarea'
@@ -5,6 +6,11 @@ import type { SpaceIndentSize } from '@/lib/indentation'
 import { getStringOverrides } from '@/lib/package-json'
 import type { ResolveResult } from '@/lib/resolver'
 import './index.css'
+
+function normalizeComparableVersion(value: string): string | null {
+  const normalized = value.replace(/^[\^~]/, '').trim()
+  return semver.valid(normalized)
+}
 
 interface Props {
   result: ResolveResult | null
@@ -38,6 +44,35 @@ export function OutputPane({
 
     const overrideNames = new Set(Object.keys(getStringOverrides(result.updatedPackage)))
     return result.staleDependencyNames.filter(name => !overrideNames.has(name))
+  })()
+  const overriddenDependencyNames = (() => {
+    if (!result) {
+      return []
+    }
+
+    return [
+      ...new Set([
+        ...Object.keys(getStringOverrides(result.updatedPackage)),
+        ...forcedOverrideNames,
+      ]),
+    ]
+  })()
+  const downgradedDependencyNames = (() => {
+    if (!result) {
+      return []
+    }
+
+    const overriddenNames = new Set(overriddenDependencyNames)
+
+    return result.changes
+      .filter(change => change.section !== 'engines')
+      .filter(change => {
+        const from = normalizeComparableVersion(change.from)
+        const to = normalizeComparableVersion(change.to)
+        return Boolean(from && to && semver.lt(to, from))
+      })
+      .map(change => change.name)
+      .filter(name => !overriddenNames.has(name))
   })()
 
   function handleCopy() {
@@ -73,9 +108,10 @@ export function OutputPane({
         ariaLabel="Updated package.json"
         readOnly
         spaceIndentSize={spaceIndentSize}
-        staleDependencyNames={result.staleDependencyNames}
+        staleDependencyNames={downgradedDependencyNames}
         onInspectDependency={onInspectDependency}
         highlightMajorBuildVersions={majorBuildsActive}
+        overriddenDependencyNames={overriddenDependencyNames}
       />
     )
   }

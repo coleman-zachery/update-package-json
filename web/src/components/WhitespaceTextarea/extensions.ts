@@ -22,6 +22,7 @@ const STALE_DEPENDENCY_SECTIONS = new Set([
 
 const STALE_DEPENDENCY_COLOR = '#ff6b72'
 const MAJOR_BUILD_COLOR = '#b59eff'
+const OVERRIDDEN_DEPENDENCY_COLOR = '#ffbe5c'
 
 class MarkerWidget extends WidgetType {
   constructor(private readonly markers: TextareaMarker[]) {
@@ -293,6 +294,78 @@ export function createMajorBuildHighlightExtension(): Extension {
   })
 
   return [majorBuildTheme, majorBuildDecorations]
+}
+
+export function createOverrideDependencyHighlightExtension(
+  overriddenDependencyNames: string[],
+): Extension {
+  if (overriddenDependencyNames.length === 0) {
+    return []
+  }
+
+  const overriddenNames = new Set(overriddenDependencyNames)
+  const overrideTheme = EditorView.baseTheme({
+    '.cm-override-dependency-version, .cm-override-dependency-version span': {
+      color: `${OVERRIDDEN_DEPENDENCY_COLOR} !important`,
+    },
+  })
+
+  const overrideDecorations = EditorView.decorations.of(view => {
+    const builder = new RangeSetBuilder<Decoration>()
+    let currentSection: string | null = null
+
+    for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
+      const line = view.state.doc.line(lineNumber)
+      const text = line.text
+
+      const sectionMatch = text.match(/^\s*"([^"]+)"\s*:\s*{\s*$/)
+      if (sectionMatch) {
+        currentSection = STALE_DEPENDENCY_SECTIONS.has(sectionMatch[1]) ? sectionMatch[1] : null
+        continue
+      }
+
+      if (/^\s*},?\s*$/.test(text)) {
+        currentSection = null
+        continue
+      }
+
+      if (!currentSection) {
+        continue
+      }
+
+      const valueMatch = text.match(/^\s*"([^"]+)"\s*:\s*"([^"]*)"\s*,?\s*$/)
+      if (!valueMatch) {
+        continue
+      }
+
+      const [, name, version] = valueMatch
+      if (!overriddenNames.has(name)) {
+        continue
+      }
+
+      const colonIndex = text.indexOf(':')
+      const versionToken = `"${version}"`
+      const valueStart = text.indexOf(versionToken, colonIndex)
+      if (valueStart < 0) {
+        continue
+      }
+
+      builder.add(
+        line.from + valueStart,
+        line.from + valueStart + versionToken.length,
+        Decoration.mark({
+          class: 'cm-override-dependency-version',
+          attributes: {
+            style: `color: ${OVERRIDDEN_DEPENDENCY_COLOR} !important;`,
+          },
+        }),
+      )
+    }
+
+    return builder.finish()
+  })
+
+  return [overrideTheme, overrideDecorations]
 }
 
 export function createInspectableDependencyExtension(

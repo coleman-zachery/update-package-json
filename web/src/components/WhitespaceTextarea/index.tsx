@@ -24,6 +24,7 @@ import {
   createInspectableDependencyExtension,
   createMajorBuildHighlightExtension,
   createMarkerExtension,
+  createOverrideDependencyHighlightExtension,
   createPackageJsonSyncExtension,
   createStaleDependencyHighlightExtension,
   type TextareaMarker,
@@ -44,6 +45,7 @@ interface Props {
   markers?: TextareaMarker[]
   onInspectDependency?: (packageName: string) => void
   highlightMajorBuildVersions?: boolean
+  overriddenDependencyNames?: string[]
 }
 
 const packageJsonHighlightStyle = HighlightStyle.define([
@@ -63,6 +65,7 @@ export function WhitespaceTextarea({
   markers = [],
   onInspectDependency,
   highlightMajorBuildVersions = false,
+  overriddenDependencyNames = [],
 }: Props) {
   const indentStyle = useMemo(
     () => getEffectiveIndentStyle(value, spaceIndentSize),
@@ -100,6 +103,10 @@ export function WhitespaceTextarea({
       configuredExtensions.push(createMajorBuildHighlightExtension())
     }
 
+    if (readOnly && overriddenDependencyNames.length > 0) {
+      configuredExtensions.push(createOverrideDependencyHighlightExtension(overriddenDependencyNames))
+    }
+
     if (!readOnly && markers.length > 0) {
       configuredExtensions.push(createMarkerExtension(markers))
     }
@@ -109,7 +116,7 @@ export function WhitespaceTextarea({
     }
 
     return configuredExtensions
-  }, [ariaLabel, highlightMajorBuildVersions, indentStyle.size, markers, onInspectDependency, readOnly, spaceIndentSize, staleDependencyNames])
+  }, [ariaLabel, highlightMajorBuildVersions, indentStyle.size, markers, onInspectDependency, overriddenDependencyNames, readOnly, spaceIndentSize, staleDependencyNames])
 
   useLayoutEffect(() => {
     const view = editorViewRef.current

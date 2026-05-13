@@ -320,7 +320,7 @@ export function DependencyExplorer({
                   <div>
                     <h4>{report.packageName}</h4>
                     <p>
-                      Latest tag <strong>{report.latestVersion || 'n/a'}</strong> • {report.stableVersionCount} stable version{report.stableVersionCount === 1 ? '' : 's'}
+                      Newest stable <strong>{report.latestVersion || 'n/a'}</strong> • {report.stableVersionCount} stable version{report.stableVersionCount === 1 ? '' : 's'}
                     </p>
                   </div>
                 </div>
