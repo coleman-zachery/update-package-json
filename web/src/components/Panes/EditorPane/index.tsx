@@ -17,6 +17,7 @@ interface Props {
   validationSeverity: 'error' | 'warning' | null
   runtimeError?: string
   markers?: TextareaMarker[]
+  onInspectDependency?: (packageName: string) => void
 }
 
 export function EditorPane({
@@ -32,6 +33,7 @@ export function EditorPane({
   validationSeverity,
   runtimeError,
   markers,
+  onInspectDependency,
 }: Props) {
   const headerTitle = validationMessages.join('\n')
 
@@ -76,6 +78,7 @@ export function EditorPane({
         onChange={onChange}
         onPasteCapture={onPasteCapture}
         markers={markers}
+        onInspectDependency={onInspectDependency}
         ariaLabel="Input package.json"
         spaceIndentSize={spaceIndentSize}
         placeholder={`Paste your package.json here…\n\nExample:\n{\n  "dependencies": {\n    "react": "^17.0.0"\n  }\n}`}

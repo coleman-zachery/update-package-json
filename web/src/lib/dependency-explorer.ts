@@ -89,13 +89,7 @@ function buildDependencyEntry(
   optional: boolean,
   packageVersion: string,
 ): DependencyExplorerDependencyEntry {
-  const compactRange = (() => {
-    try {
-      return formatCompactSemverRange(range)
-    } catch {
-      return range
-    }
-  })()
+  const compactRange = safeFormatCompactSemverRange(range)
   const matchesPackageVersion = semver.valid(range) === packageVersion
 
   return {
@@ -105,6 +99,14 @@ function buildDependencyEntry(
     name,
     optional,
     matchesPackageVersion,
+  }
+}
+
+function safeFormatCompactSemverRange(range: string): string {
+  try {
+    return formatCompactSemverRange(range)
+  } catch {
+    return range
   }
 }
 
@@ -164,40 +166,44 @@ export async function inspectDependencyPackage(
   const dependencyColumns = new Set<string>()
 
   for (const version of stableVersions) {
-    const manifest = packument.versions[version]
-    if (!manifest) {
+    try {
+      const manifest = packument.versions[version]
+      if (!manifest) {
+        continue
+      }
+
+      const directDependencies = getDirectDependencies(manifest, version)
+      const dependencyValues = Object.fromEntries(
+        directDependencies.map(entry => {
+          dependencyColumns.add(entry.name)
+          return [
+            entry.name,
+            entry.matchesPackageVersion ? DEPENDENCY_EXPLORER_SAME_VALUE : entry.displayRange,
+          ]
+        }),
+      )
+      const signatureKey = getSignatureKey(manifest, dependencyValues)
+      const existing = rowsByKey.get(signatureKey)
+
+      if (existing) {
+        existing.versions.push(version)
+        existing.oldestVersion = semver.lt(version, existing.oldestVersion) ? version : existing.oldestVersion
+        continue
+      }
+
+      rowsByKey.set(signatureKey, {
+        key: signatureKey,
+        versions: [version],
+        newestVersion: version,
+        oldestVersion: version,
+        engineNode: getTrimmedString(manifest.engines?.node) ? safeFormatCompactSemverRange(getTrimmedString(manifest.engines?.node)) : '-',
+        engineNpm: getTrimmedString(manifest.engines?.npm) ? safeFormatCompactSemverRange(getTrimmedString(manifest.engines?.npm)) : '-',
+        directDependencies,
+        dependencyValues,
+      })
+    } catch {
       continue
     }
-
-    const directDependencies = getDirectDependencies(manifest, version)
-    const dependencyValues = Object.fromEntries(
-      directDependencies.map(entry => {
-        dependencyColumns.add(entry.name)
-        return [
-          entry.name,
-          entry.matchesPackageVersion ? DEPENDENCY_EXPLORER_SAME_VALUE : entry.displayRange,
-        ]
-      }),
-    )
-    const signatureKey = getSignatureKey(manifest, dependencyValues)
-    const existing = rowsByKey.get(signatureKey)
-
-    if (existing) {
-      existing.versions.push(version)
-      existing.oldestVersion = semver.lt(version, existing.oldestVersion) ? version : existing.oldestVersion
-      continue
-    }
-
-    rowsByKey.set(signatureKey, {
-      key: signatureKey,
-      versions: [version],
-      newestVersion: version,
-      oldestVersion: version,
-      engineNode: getTrimmedString(manifest.engines?.node) ? formatCompactSemverRange(getTrimmedString(manifest.engines?.node)) : '-',
-      engineNpm: getTrimmedString(manifest.engines?.npm) ? formatCompactSemverRange(getTrimmedString(manifest.engines?.npm)) : '-',
-      directDependencies,
-      dependencyValues,
-    })
   }
 
   const rows = Array.from(rowsByKey.values())

@@ -1,4 +1,4 @@
-import { Decoration, EditorView, WidgetType } from '@codemirror/view'
+import { Decoration, EditorView, ViewPlugin, WidgetType } from '@codemirror/view'
 import { EditorState, RangeSetBuilder, type Extension } from '@codemirror/state'
 import { getTextReplacement, syncPackageJsonAfterInputChange } from '@/lib/package-json'
 import type { SpaceIndentSize } from '@/lib/indentation'
@@ -21,6 +21,7 @@ const STALE_DEPENDENCY_SECTIONS = new Set([
 ])
 
 const STALE_DEPENDENCY_COLOR = '#ff6b72'
+const MAJOR_BUILD_COLOR = '#b59eff'
 
 class MarkerWidget extends WidgetType {
   constructor(private readonly markers: TextareaMarker[]) {
@@ -227,4 +228,156 @@ export function createStaleDependencyHighlightExtension(
   })
 
   return [staleTheme, staleDecorations]
+}
+
+export function createMajorBuildHighlightExtension(): Extension {
+  const majorBuildTheme = EditorView.baseTheme({
+    '.cm-major-build-version, .cm-major-build-version span': {
+      color: `${MAJOR_BUILD_COLOR} !important`,
+    },
+  })
+
+  const majorBuildDecorations = EditorView.decorations.of(view => {
+    const builder = new RangeSetBuilder<Decoration>()
+    let currentSection: string | null = null
+
+    for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
+      const line = view.state.doc.line(lineNumber)
+      const text = line.text
+
+      const sectionMatch = text.match(/^\s*"([^"]+)"\s*:\s*{\s*$/)
+      if (sectionMatch) {
+        currentSection = STALE_DEPENDENCY_SECTIONS.has(sectionMatch[1]) ? sectionMatch[1] : null
+        continue
+      }
+
+      if (/^\s*},?\s*$/.test(text)) {
+        currentSection = null
+        continue
+      }
+
+      if (!currentSection) {
+        continue
+      }
+
+      const valueMatch = text.match(/^\s*"([^"]+)"\s*:\s*"([^"]*)"\s*,?\s*$/)
+      if (!valueMatch) {
+        continue
+      }
+
+      const [, , version] = valueMatch
+      if (!version.startsWith('^')) {
+        continue
+      }
+
+      const colonIndex = text.indexOf(':')
+      const versionToken = `"${version}"`
+      const valueStart = text.indexOf(versionToken, colonIndex)
+      if (valueStart < 0) {
+        continue
+      }
+
+      builder.add(
+        line.from + valueStart,
+        line.from + valueStart + versionToken.length,
+        Decoration.mark({
+          class: 'cm-major-build-version',
+          attributes: {
+            style: `color: ${MAJOR_BUILD_COLOR} !important;`,
+          },
+        }),
+      )
+    }
+
+    return builder.finish()
+  })
+
+  return [majorBuildTheme, majorBuildDecorations]
+}
+
+export function createInspectableDependencyExtension(
+  onInspectDependency: (packageName: string) => void,
+): Extension {
+  const inspectableTheme = EditorView.baseTheme({
+    '.cm-inspectable-dependency:hover, .cm-inspectable-dependency:hover span': {
+      cursor: 'zoom-in',
+      textDecoration: 'underline',
+      textDecorationColor: 'var(--accent-soft)',
+      textUnderlineOffset: '0.15em',
+    },
+  })
+
+  const inspectableDecorations = EditorView.decorations.of(view => {
+    const builder = new RangeSetBuilder<Decoration>()
+    let currentSection: string | null = null
+
+    for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
+      const line = view.state.doc.line(lineNumber)
+      const text = line.text
+
+      const sectionMatch = text.match(/^\s*"([^"]+)"\s*:\s*{\s*$/)
+      if (sectionMatch) {
+        currentSection = STALE_DEPENDENCY_SECTIONS.has(sectionMatch[1]) ? sectionMatch[1] : null
+        continue
+      }
+
+      if (/^\s*},?\s*$/.test(text)) {
+        currentSection = null
+        continue
+      }
+
+      if (!currentSection) {
+        continue
+      }
+
+      const propertyMatch = text.match(/^(\s*"([^"]+)")\s*:\s*"([^"]*)"\s*,?\s*$/)
+      if (!propertyMatch) {
+        continue
+      }
+
+      const packageName = propertyMatch[2]
+      const quotedToken = `"${packageName}"`
+      const quotedTokenStart = text.indexOf(quotedToken)
+      const nameStart = quotedTokenStart >= 0 ? quotedTokenStart + 1 : -1
+      if (nameStart < 0) {
+        continue
+      }
+
+      builder.add(
+        line.from + nameStart,
+        line.from + nameStart + packageName.length,
+        Decoration.mark({
+          class: 'cm-inspectable-dependency',
+          attributes: {
+            'data-package-name': packageName,
+            title: `Inspect ${packageName}`,
+          },
+        }),
+      )
+    }
+
+    return builder.finish()
+  })
+
+  const inspectableEvents = ViewPlugin.fromClass(class {}, {
+    eventHandlers: {
+      contextmenu(event) {
+        const target = event.target
+        if (!(target instanceof HTMLElement)) {
+          return
+        }
+
+        const dependencyElement = target.closest<HTMLElement>('.cm-inspectable-dependency')
+        const packageName = dependencyElement?.dataset.packageName
+        if (!packageName) {
+          return
+        }
+
+        event.preventDefault()
+        onInspectDependency(packageName)
+      },
+    },
+  })
+
+  return [inspectableTheme, inspectableDecorations, inspectableEvents]
 }

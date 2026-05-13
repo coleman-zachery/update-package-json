@@ -39,20 +39,19 @@
   border-color: var(--accent);
 }
 
+.output-pane__button--warning {
+  background: var(--bg-panel-warn);
+  border-color: var(--border-warn);
+  color: var(--warning-soft);
+}
+
+.output-pane__button--warning:hover:not(:disabled) {
+  background: #3a270a;
+  border-color: #d28718;
+  color: var(--warning-soft);
+}
+
 .output-pane__button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-.output-pane__button--danger {
-  color: var(--danger) !important;
-}
-
-.output-pane__button--danger:hover:not(:disabled) {
-  border-color: var(--border-danger);
-  color: var(--danger) !important;
-}
-
-.output-pane__button--danger:disabled {
-  color: color-mix(in srgb, var(--danger) 55%, var(--text-dim));
 }

@@ -22,12 +22,29 @@ interface Props {
   canApply: boolean
   applyDisabledReason?: string
   onApplyVersion: (packageName: string, versionSpec: string, freeze: boolean) => Promise<void>
+  openRequest?: DependencyExplorerOpenRequest | null
 }
 
 interface VisibleRow extends DependencyExplorerRow {
   visibleVersions: string[]
   visibleVersionLabel: string
   targetVersion: string
+}
+
+export interface DependencyExplorerOpenRequest {
+  id: number
+  packageName: string
+  contextPackage: PackageJson
+  contextSourceLabel: string
+  canApply: boolean
+  applyDisabledReason?: string
+}
+
+interface ExplorerSessionContext {
+  packageJson: PackageJson
+  sourceLabel: string
+  canApply: boolean
+  applyDisabledReason?: string
 }
 
 function getInitialVisibleMajorCount(report: DependencyExplorerReport): number {
@@ -85,6 +102,7 @@ export function DependencyExplorer({
   canApply,
   applyDisabledReason,
   onApplyVersion,
+  openRequest,
 }: Props) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -93,7 +111,26 @@ export function DependencyExplorer({
   const [report, setReport] = useState<DependencyExplorerReport | null>(null)
   const [visibleMajorCount, setVisibleMajorCount] = useState(0)
   const [applyPendingVersion, setApplyPendingVersion] = useState<string | null>(null)
+  const [sessionContext, setSessionContext] = useState<ExplorerSessionContext>({
+    packageJson: contextPackage,
+    sourceLabel: contextSourceLabel,
+    canApply,
+    applyDisabledReason,
+  })
   const inputRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (open) {
+      return
+    }
+
+    setSessionContext({
+      packageJson: contextPackage,
+      sourceLabel: contextSourceLabel,
+      canApply,
+      applyDisabledReason,
+    })
+  }, [applyDisabledReason, canApply, contextPackage, contextSourceLabel, open])
 
   const visibleRows = useMemo(
     () => createVisibleRows(report, visibleMajorCount),
@@ -122,7 +159,25 @@ export function DependencyExplorer({
     }
   }, [open])
 
-  async function runInspect(nextQuery: string) {
+  useEffect(() => {
+    if (!openRequest) {
+      return
+    }
+
+    const nextContext = {
+      packageJson: openRequest.contextPackage,
+      sourceLabel: openRequest.contextSourceLabel,
+      canApply: openRequest.canApply,
+      applyDisabledReason: openRequest.applyDisabledReason,
+    }
+
+    setSessionContext(nextContext)
+    setOpen(true)
+    setQuery(openRequest.packageName)
+    void runInspect(openRequest.packageName, nextContext.packageJson)
+  }, [openRequest])
+
+  async function runInspect(nextQuery: string, context: PackageJson = sessionContext.packageJson) {
     if (!nextQuery) {
       setStatus('error')
       setErrorMsg('Enter a package name to inspect.')
@@ -135,7 +190,7 @@ export function DependencyExplorer({
     setErrorMsg('')
 
     try {
-      const nextReport = await inspectDependencyPackage(nextQuery, contextPackage)
+      const nextReport = await inspectDependencyPackage(nextQuery, context)
       setReport(nextReport)
       setVisibleMajorCount(getInitialVisibleMajorCount(nextReport))
       setStatus('done')
@@ -150,6 +205,18 @@ export function DependencyExplorer({
   async function handleInspect(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     await runInspect(query.trim())
+  }
+
+  async function handleLaunchInspect(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSessionContext({
+      packageJson: contextPackage,
+      sourceLabel: contextSourceLabel,
+      canApply,
+      applyDisabledReason,
+    })
+    setOpen(true)
+    await runInspect(query.trim(), contextPackage)
   }
 
   async function handleInspectDependencyColumn(packageName: string) {
@@ -177,14 +244,22 @@ export function DependencyExplorer({
 
   return (
     <div className="dependency-explorer">
-      <button
-        type="button"
-        className={`dependency-explorer__trigger${open ? ' dependency-explorer__trigger--active' : ''}`}
-        onClick={() => setOpen(current => !current)}
-        aria-expanded={open}
+      <form
+        className={`dependency-explorer__search dependency-explorer__search--header${open ? ' dependency-explorer__search--active' : ''}`}
+        onSubmit={handleLaunchInspect}
       >
-        Inspect Dependency
-      </button>
+        <input
+          type="text"
+          value={query}
+          onChange={event => setQuery(event.target.value)}
+          placeholder="react-docgen"
+          spellCheck={false}
+          aria-label="Package name"
+        />
+        <button type="submit" aria-expanded={open}>
+          Inspect Dependency
+        </button>
+      </form>
 
       {open ? (
         <div
@@ -202,7 +277,7 @@ export function DependencyExplorer({
             <div className="dependency-explorer__panel-header">
               <div>
                 <h3>Dependency explorer</h3>
-                <p>Uses the current {contextSourceLabel.toLowerCase()} as the compatibility baseline.</p>
+                <p>Uses the current {sessionContext.sourceLabel.toLowerCase()} as the compatibility baseline.</p>
               </div>
               <button
                 type="button"
@@ -299,8 +374,8 @@ export function DependencyExplorer({
                                 type="button"
                                 className={`dependency-explorer__version-button${freeze ? ' dependency-explorer__version-button--override' : ''}`}
                                 onClick={() => void handleApplyRow(row)}
-                                disabled={!canApply || applyPendingVersion !== null}
-                                title={!canApply && applyDisabledReason ? applyDisabledReason : buttonTitle}
+                                disabled={!sessionContext.canApply || applyPendingVersion !== null}
+                                title={!sessionContext.canApply && sessionContext.applyDisabledReason ? sessionContext.applyDisabledReason : buttonTitle}
                               >
                                 {applyPendingVersion === row.key ? 'Adding…' : row.visibleVersionLabel}
                               </button>

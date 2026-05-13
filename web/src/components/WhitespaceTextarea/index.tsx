@@ -21,6 +21,8 @@ import {
 import { tags } from '@lezer/highlight'
 import { getEffectiveIndentStyle, getIndentText, type SpaceIndentSize } from '@/lib/indentation'
 import {
+  createInspectableDependencyExtension,
+  createMajorBuildHighlightExtension,
   createMarkerExtension,
   createPackageJsonSyncExtension,
   createStaleDependencyHighlightExtension,
@@ -40,6 +42,8 @@ interface Props {
   spaceIndentSize?: SpaceIndentSize
   staleDependencyNames?: string[]
   markers?: TextareaMarker[]
+  onInspectDependency?: (packageName: string) => void
+  highlightMajorBuildVersions?: boolean
 }
 
 const packageJsonHighlightStyle = HighlightStyle.define([
@@ -57,6 +61,8 @@ export function WhitespaceTextarea({
   spaceIndentSize,
   staleDependencyNames = [],
   markers = [],
+  onInspectDependency,
+  highlightMajorBuildVersions = false,
 }: Props) {
   const indentStyle = useMemo(
     () => getEffectiveIndentStyle(value, spaceIndentSize),
@@ -90,12 +96,20 @@ export function WhitespaceTextarea({
       configuredExtensions.push(createStaleDependencyHighlightExtension(staleDependencyNames))
     }
 
+    if (readOnly && highlightMajorBuildVersions) {
+      configuredExtensions.push(createMajorBuildHighlightExtension())
+    }
+
     if (!readOnly && markers.length > 0) {
       configuredExtensions.push(createMarkerExtension(markers))
     }
 
+    if (onInspectDependency) {
+      configuredExtensions.push(createInspectableDependencyExtension(onInspectDependency))
+    }
+
     return configuredExtensions
-  }, [ariaLabel, indentStyle.size, markers, readOnly, spaceIndentSize, staleDependencyNames])
+  }, [ariaLabel, highlightMajorBuildVersions, indentStyle.size, markers, onInspectDependency, readOnly, spaceIndentSize, staleDependencyNames])
 
   useLayoutEffect(() => {
     const view = editorViewRef.current

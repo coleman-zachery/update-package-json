@@ -22,7 +22,6 @@ import {
   hasDependencyOverride,
   parsePackageJson,
   reformatPackageJson,
-  removeDependencyOverrides,
   serializePackageJson,
   setDependencyFrozen,
   upsertDependencyValue,
@@ -52,6 +51,11 @@ import './index.css'
 type PendingAction = 'update' | 'apply-fixes'
 const MAX_APPLY_FIXES_PASSES = 8
 
+function getPendingForcedOverrideNames(result: ResolveResult): string[] {
+  const existingOverrideNames = new Set(Object.keys(getStringOverrides(result.updatedPackage)))
+  return result.staleDependencyNames.filter(name => !existingOverrideNames.has(name))
+}
+
 export default function App() {
   const [input, setInput] = useState('')
   const [spaceIndentSize, setSpaceIndentSize] = useState<SpaceIndentSize>(2)
@@ -63,8 +67,17 @@ export default function App() {
   const [restrictions, setRestrictions] = useState<Record<string, boolean>>({})
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [forcedOverrideNames, setForcedOverrideNames] = useState<string[]>([])
-  const [majorBuildsActive, setMajorBuildsActive] = useState(false)
+  const [majorBuildsActive, setMajorBuildsActive] = useState(true)
+  const [dependencyExplorerRequest, setDependencyExplorerRequest] = useState<{
+    id: number
+    packageName: string
+    contextPackage: ReturnType<typeof parsePackageJson> | {}
+    contextSourceLabel: string
+    canApply: boolean
+    applyDisabledReason?: string
+  } | null>(null)
   const pendingIndentAutoDetectRef = useRef(false)
+  const dependencyExplorerRequestIdRef = useRef(0)
 
   const latestVersions = useLatestVersions()
   const inputValidation = useInputValidation(input)
@@ -85,19 +98,31 @@ export default function App() {
     }
   }, [input])
 
-  const outputJson = useMemo(() => {
+  const outputPackage = useMemo(() => {
     if (!result) {
-      return ''
+      return null
     }
 
-    const outputPackage = majorBuildsActive
-      ? applyMajorBuildRanges(result.updatedPackage, result.latestDependencyNames)
+    const packageWithForcedOverrides = forcedOverrideNames.length > 0
+      ? forceDependenciesIntoOverrides(result.updatedPackage, forcedOverrideNames)
       : result.updatedPackage
+    const overriddenDependencyNames = new Set(Object.keys(getStringOverrides(packageWithForcedOverrides)))
+    const majorBuildCandidateNames = result.latestDependencyNames.filter(name => !overriddenDependencyNames.has(name))
+
+    return majorBuildsActive
+      ? applyMajorBuildRanges(packageWithForcedOverrides, majorBuildCandidateNames)
+      : packageWithForcedOverrides
+  }, [forcedOverrideNames, majorBuildsActive, result])
+
+  const outputJson = useMemo(() => {
+    if (!outputPackage) {
+      return ''
+    }
 
     return serializePackageJson(outputPackage, createSpaceIndentStyle(spaceIndentSize), {
       packageManagerBeforeEngines: true,
     })
-  }, [majorBuildsActive, result, spaceIndentSize])
+  }, [outputPackage, spaceIndentSize])
 
   const restrictableEntries = useMemo(() => detectRestrictableEntries(input), [input])
 
@@ -141,6 +166,8 @@ export default function App() {
     try {
       const { resolvePackageJson } = await loadResolverModule()
       const nextResult = await resolvePackageJson(nextInput, options, nextRestrictions)
+      setForcedOverrideNames(getPendingForcedOverrideNames(nextResult))
+      setMajorBuildsActive(true)
       setResult(nextResult)
       setStatus('done')
     } catch (error) {
@@ -203,6 +230,8 @@ export default function App() {
 
       setInput(workingInput)
       setRestrictions(workingRestrictions)
+      setForcedOverrideNames(getPendingForcedOverrideNames(workingResult))
+      setMajorBuildsActive(true)
       setResult(workingResult)
       setStatus('done')
     } catch (error) {
@@ -316,17 +345,7 @@ export default function App() {
     setInput(current => reformatPackageJson(current, nextSpaceIndentSize))
   }
 
-  const explorerContext = useMemo(() => {
-    if (status === 'done' && result) {
-      return {
-        pkg: result.updatedPackage,
-        raw: outputJson,
-        sourceLabel: 'Updated output package.json',
-        canApply: pendingEngine === null,
-        applyDisabledReason: '',
-      }
-    }
-
+  const inputExplorerContext = useMemo(() => {
     if (!input.trim()) {
       return {
         pkg: {},
@@ -355,6 +374,22 @@ export default function App() {
       }
     }
   }, [input, outputJson, pendingEngine, result, status])
+
+  const outputExplorerContext = useMemo(() => {
+    if (status === 'done' && outputPackage) {
+      return {
+        pkg: outputPackage,
+        raw: outputJson,
+        sourceLabel: 'Updated output package.json',
+        canApply: pendingEngine === null,
+        applyDisabledReason: '',
+      }
+    }
+
+    return null
+  }, [outputJson, outputPackage, pendingEngine, status])
+
+  const explorerContext = outputExplorerContext ?? inputExplorerContext
 
   async function handleApplyDependencyVersion(
     packageName: string,
@@ -407,29 +442,36 @@ export default function App() {
     }
 
     if (forcedOverrideNames.length > 0) {
-      setResult(current => current ? {
-        ...current,
-        updatedPackage: removeDependencyOverrides(current.updatedPackage, forcedOverrideNames),
-      } : current)
       setForcedOverrideNames([])
       return
     }
 
-    const existingOverrideNames = new Set(Object.keys(getStringOverrides(result.updatedPackage)))
-    const nextForcedOverrideNames = result.staleDependencyNames.filter(name => !existingOverrideNames.has(name))
+    const nextForcedOverrideNames = getPendingForcedOverrideNames(result)
     if (nextForcedOverrideNames.length === 0) {
       return
     }
 
-    setResult(current => current ? {
-      ...current,
-      updatedPackage: forceDependenciesIntoOverrides(current.updatedPackage, nextForcedOverrideNames),
-    } : current)
     setForcedOverrideNames(nextForcedOverrideNames)
   }
 
   function handleMajorBuildsToggle() {
     setMajorBuildsActive(current => !current)
+  }
+
+  function handleInspectDependency(packageName: string, source: 'input' | 'output') {
+    const nextContext = source === 'output' && outputExplorerContext
+      ? outputExplorerContext
+      : inputExplorerContext
+
+    dependencyExplorerRequestIdRef.current += 1
+    setDependencyExplorerRequest({
+      id: dependencyExplorerRequestIdRef.current,
+      packageName,
+      contextPackage: nextContext.pkg,
+      contextSourceLabel: nextContext.sourceLabel,
+      canApply: nextContext.canApply,
+      applyDisabledReason: nextContext.applyDisabledReason,
+    })
   }
 
   function handleRestrictionToggle(entry: RestrictableEntry) {
@@ -627,6 +669,7 @@ export default function App() {
             canApply={explorerContext.canApply}
             applyDisabledReason={explorerContext.applyDisabledReason}
             onApplyVersion={handleApplyDependencyVersion}
+            openRequest={dependencyExplorerRequest}
           />
         )}
       />
@@ -653,6 +696,7 @@ export default function App() {
             validationSeverity={validationSeverity}
             runtimeError={errorMsg}
             markers={restrictionMarkers}
+            onInspectDependency={packageName => handleInspectDependency(packageName, 'input')}
           />
         </div>
         <div className="app__column">
@@ -671,6 +715,7 @@ export default function App() {
             onForceOverrides={handleForceOverrides}
             onToggleMajorBuilds={handleMajorBuildsToggle}
             onUseAsInput={handleUseOutputAsInput}
+            onInspectDependency={packageName => handleInspectDependency(packageName, 'output')}
             forcedOverrideNames={forcedOverrideNames}
             majorBuildsActive={majorBuildsActive}
             spaceIndentSize={spaceIndentSize}

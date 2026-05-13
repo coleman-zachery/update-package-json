@@ -12,6 +12,7 @@ interface Props {
   onForceOverrides: () => void
   onToggleMajorBuilds: () => void
   onUseAsInput: (value: string) => void
+  onInspectDependency: (packageName: string) => void
   forcedOverrideNames: string[]
   majorBuildsActive: boolean
   spaceIndentSize: SpaceIndentSize
@@ -24,6 +25,7 @@ export function OutputPane({
   onForceOverrides,
   onToggleMajorBuilds,
   onUseAsInput,
+  onInspectDependency,
   forcedOverrideNames,
   majorBuildsActive,
   spaceIndentSize,
@@ -72,6 +74,8 @@ export function OutputPane({
         readOnly
         spaceIndentSize={spaceIndentSize}
         staleDependencyNames={result.staleDependencyNames}
+        onInspectDependency={onInspectDependency}
+        highlightMajorBuildVersions={majorBuildsActive}
       />
     )
   }
@@ -79,8 +83,14 @@ export function OutputPane({
   const outputActionsDisabled = !result || status !== 'done'
   const forceOverridesActive = forcedOverrideNames.length > 0
   const forceOverridesDisabled = !result || status !== 'done' || (!forceOverridesActive && pendingOverrideNames.length === 0)
-  const forceOverridesLabel = forceOverridesActive ? 'Undo Overrides' : 'Force Overrides'
-  const majorBuildNames = result?.latestDependencyNames ?? []
+  const majorBuildNames = (() => {
+    if (!result) {
+      return []
+    }
+
+    const overriddenDependencyNames = new Set(Object.keys(getStringOverrides(result.updatedPackage)))
+    return result.latestDependencyNames.filter(name => !overriddenDependencyNames.has(name))
+  })()
   const majorBuildsDisabled = !result || status !== 'done' || (!majorBuildsActive && majorBuildNames.length === 0)
 
   return (
@@ -91,11 +101,11 @@ export function OutputPane({
           <div className="output-pane__actions">
             <button
               type="button"
-              className="output-pane__button output-pane__button--danger"
+              className={`output-pane__button${forceOverridesActive ? ' output-pane__button--warning' : ''}`}
               onClick={onForceOverrides}
               disabled={forceOverridesDisabled}
             >
-              {forceOverridesLabel}
+              Force Overrides
             </button>
             <button
               type="button"
