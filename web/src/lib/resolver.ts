@@ -429,15 +429,11 @@ function getDependencyRangeCandidates(range: string, versions: string[]): string
 
 function getRequiredPeerDependencies(
   manifest: VersionManifest | undefined,
-  addOptionalPeerDeps: boolean,
 ): Record<string, { range: string; optional: boolean }> {
   if (!manifest?.peerDependencies) return {}
 
   return Object.fromEntries(
     Object.entries(manifest.peerDependencies)
-      .filter(([peerName]) => {
-        return addOptionalPeerDeps || manifest.peerDependenciesMeta?.[peerName]?.optional !== true
-      })
       .map(([peerName, range]) => [
         peerName,
         {
@@ -453,6 +449,19 @@ function getPeerRequirementSection(
   optional: boolean,
 ): DependencySection {
   return optional ? 'peerDependencies' : sourceSection
+}
+
+function shouldEnforcePeerRequirement(
+  peerRequirement: { optional: boolean },
+  peerName: string,
+  addOptionalPeerDeps: boolean,
+  states: Map<string, PackageState>,
+): boolean {
+  if (!peerRequirement.optional) {
+    return true
+  }
+
+  return addOptionalPeerDeps || states.has(peerName)
 }
 
 async function pickCompatibleEngineVersion(
@@ -774,7 +783,7 @@ async function resolveWithEngines(
       currentIndex: candidateVersions.indexOf(currentVersion),
       currentVersion,
       manifest,
-      peerDependencies: getRequiredPeerDependencies(manifest, options.addOptionalPeerDeps),
+      peerDependencies: getRequiredPeerDependencies(manifest),
       transitiveOverridePlans,
     }
   }
@@ -839,7 +848,7 @@ async function resolveWithEngines(
     state.currentVersion = nextVersion
     state.currentIndex = candidateIndex >= 0 ? candidateIndex : state.currentIndex
     state.manifest = manifest
-    state.peerDependencies = getRequiredPeerDependencies(manifest, options.addOptionalPeerDeps)
+    state.peerDependencies = getRequiredPeerDependencies(manifest)
     if (!(nextVersion in state.transitiveOverridePlans)) {
       const overridePlan = await getTransitiveOverridePlan(manifest)
       if (overridePlan) {
@@ -858,6 +867,10 @@ async function resolveWithEngines(
 
       for (const state of states.values()) {
         for (const [peerName, peerRequirement] of Object.entries(state.peerDependencies)) {
+          if (!shouldEnforcePeerRequirement(peerRequirement, peerName, options.addOptionalPeerDeps, states)) {
+            continue
+          }
+
           const peerSection = getPeerRequirementSection(state.section, peerRequirement.optional)
           const request = requiredPeers.get(peerName) ?? { range: peerRequirement.range, sources: new Set<string>(), section: peerSection }
           request.range = peerRequirement.range
@@ -943,7 +956,7 @@ async function resolveWithEngines(
       const manifest = packument.versions[candidate]
       if (!manifest) continue
 
-      const requiredPeers = getRequiredPeerDependencies(manifest, options.addOptionalPeerDeps)
+      const requiredPeers = getRequiredPeerDependencies(manifest)
       const requiredRange = requiredPeers[peerName]?.range
       if (!requiredRange || semver.satisfies(peerVersion, requiredRange)) {
         return candidate
