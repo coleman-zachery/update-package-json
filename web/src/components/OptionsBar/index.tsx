@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import type { EngineName, ResolveOptions } from '@/lib/resolver'
+import type { PlatformSelection } from '@/lib/resolver'
 import './index.css'
 
 export interface EngineControlButton {
@@ -26,6 +27,14 @@ export interface OptionControlButton {
 interface Props {
   engineButtons: EngineControlButton[]
   optionButtons: OptionControlButton[]
+  platformSelectors?: {
+    osOptions: Array<{ value: string; label: string }>
+    archOptions: Array<{ value: string; label: string }>
+    runtimeOptions: Array<{ value: string; label: string }>
+    selection: PlatformSelection
+    disabled: boolean
+    onChange: (key: keyof PlatformSelection, value: string) => void
+  }
   utility?: ReactNode
   onEngineClick: (engineName: EngineName) => void
   onOptionClick: (key: keyof ResolveOptions) => void
@@ -34,6 +43,7 @@ interface Props {
 export function OptionsBar({
   engineButtons,
   optionButtons,
+  platformSelectors,
   utility,
   onEngineClick,
   onOptionClick,
@@ -68,6 +78,47 @@ export function OptionsBar({
             <span className="options-toggle__meta">{button.meta}</span>
           </button>
         ))}
+
+        {platformSelectors ? (
+          <div className="options-bar__platform-selectors">
+            <label className="options-bar__platform-field">
+              <span className="options-bar__platform-label">OS</span>
+              <select
+                value={platformSelectors.selection.os ?? ''}
+                onChange={event => platformSelectors.onChange('os', event.target.value)}
+                disabled={platformSelectors.disabled}
+              >
+                {platformSelectors.osOptions.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="options-bar__platform-field">
+              <span className="options-bar__platform-label">Arch</span>
+              <select
+                value={platformSelectors.selection.arch ?? ''}
+                onChange={event => platformSelectors.onChange('arch', event.target.value)}
+                disabled={platformSelectors.disabled}
+              >
+                {platformSelectors.archOptions.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label className="options-bar__platform-field">
+              <span className="options-bar__platform-label">Runtime</span>
+              <select
+                value={platformSelectors.selection.runtime ?? ''}
+                onChange={event => platformSelectors.onChange('runtime', event.target.value)}
+                disabled={platformSelectors.disabled}
+              >
+                {platformSelectors.runtimeOptions.map(option => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
 
         {utility ? (
           <div className="options-bar__utility">

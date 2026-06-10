@@ -172,3 +172,42 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
+
+.platform-targets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.platform-targets__hint {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.platform-targets__hint--warn {
+  color: var(--warning);
+}
+
+.platform-targets__families {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.platform-targets__family {
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--warning) 22%, var(--border));
+}
+
+.platform-targets__family:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.platform-targets__family-title {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}

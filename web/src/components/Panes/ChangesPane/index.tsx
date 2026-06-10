@@ -6,12 +6,14 @@ import {
   createChangeSummary,
   type AddedDependencySection,
 } from '@/lib/change-summary'
-import type { ResolveResult } from '@/lib/resolver'
+import type { ResolveProgress, ResolveResult } from '@/lib/resolver'
+import { PlatformTargetsSection } from './platform-targets'
 import './index.css'
 
 interface Props {
   result: ResolveResult | null
   status: 'idle' | 'loading' | 'done' | 'error'
+  progress?: ResolveProgress | null
   onApplyFixes?: () => void
   applyFixesDisabled?: boolean
   applyFixesLabel?: string
@@ -32,6 +34,7 @@ function getAuditSectionClassName(state: ResolveResult['auditStatus']['state']):
 export function ChangesPane({
   result,
   status,
+  progress = null,
   onApplyFixes,
   applyFixesDisabled = false,
   applyFixesLabel = 'Apply Fixes',
@@ -84,7 +87,7 @@ export function ChangesPane({
     }
 
     if (status === 'loading') {
-      return <PaneState loading message="Resolving…" />
+      return <PaneState loading progress={progress} message="Resolving…" />
     }
 
     if (status === 'error' || !result) {
@@ -114,6 +117,10 @@ export function ChangesPane({
             </ul>
           ) : null}
         </section>
+
+        <PlatformTargetsSection
+          platformSupport={result.platformSupport}
+        />
 
         {!hasAnything ? (
           <section className="summary-section summary-section--success">
