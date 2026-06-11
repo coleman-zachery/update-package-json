@@ -9,6 +9,10 @@ import { ensureState, syncPeerGraph } from './pass-state'
 import { getRestrictionRange } from './state-helpers'
 import type { AddedPeerDep, DependencySection, ResolutionPass, ResolveOptions, ResolvePreferences } from './types'
 
+function dedupePreservingOrder(values: string[]): string[] {
+  return Array.from(new Set(values))
+}
+
 export async function resolveWithEngines(
   pkg: PackageJson,
   options: ResolveOptions,
@@ -86,7 +90,7 @@ export async function resolveWithEngines(
     peerDeps: ctx.peerDeps,
     auditStatus,
     addedPeerDeps,
-    conflicts: ctx.conflicts,
+    conflicts: dedupePreservingOrder(ctx.conflicts),
     engineWarnings: ctx.engineWarnings,
     latestDependencyNames,
     staleDependencyNames,

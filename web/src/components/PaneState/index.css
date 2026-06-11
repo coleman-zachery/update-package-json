@@ -39,6 +39,12 @@
   transition: width 0.18s ease-out;
 }
 
+.pane-state__progress-copy {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
 @keyframes pane-state-spin {
   to {
     transform: rotate(360deg);

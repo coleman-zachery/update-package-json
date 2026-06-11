@@ -26,7 +26,7 @@ function createAuditManager() {
 }
 
 async function findLatestSafeCandidate(audit: ReturnType<typeof createAuditManager>, state: PackageState): Promise<string | null> {
-  const candidateVersions = state.candidateVersions.slice(state.currentIndex)
+  const candidateVersions = Array.from(new Set(state.candidateVersions))
   await audit.prefetch(candidateVersions.map(version => ({ name: state.name, version })))
   for (const candidateVersion of candidateVersions) {
     if ((await audit.get(state.name, candidateVersion)).advisories.length === 0) return candidateVersion

@@ -20,6 +20,24 @@ interface InstallTargetAnalysis {
   latestSatisfyingIsEngineCompatible: boolean
 }
 
+const PROGRESS_ROOT_SECTIONS: DependencySection[] = [
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+]
+
+function countInitialTraversalTargets(pkg: PackageJson): number {
+  const names = new Set<string>()
+
+  for (const section of PROGRESS_ROOT_SECTIONS) {
+    for (const name of Object.keys(pkg[section] ?? {})) {
+      names.add(name)
+    }
+  }
+
+  return names.size
+}
+
 export interface ResolutionContext {
   pkg: PackageJson
   options: ResolveOptions
@@ -64,13 +82,14 @@ export function createResolutionContext(
 ): ResolutionContext {
   const packumentCache = new Map<string, Awaited<ReturnType<typeof fetchPackument>>>()
   const installTargetCache = new Map<string, InstallTargetAnalysis>()
+  const initialTraversalTotal = countInitialTraversalTargets(pkg)
   const discoveredTraversalNames = new Set<string>()
   const completedTraversalNames = new Set<string>()
 
   function emitProgress() {
     preferences.onProgress?.({
       completed: completedTraversalNames.size,
-      total: Math.max(discoveredTraversalNames.size, completedTraversalNames.size),
+      total: Math.max(initialTraversalTotal, discoveredTraversalNames.size, completedTraversalNames.size),
     } satisfies ResolveProgress)
   }
 
@@ -186,5 +205,7 @@ export function createResolutionContext(
       return sources.join(', ') || 'unknown'
     },
   }
+
+  emitProgress()
   return ctx
 }

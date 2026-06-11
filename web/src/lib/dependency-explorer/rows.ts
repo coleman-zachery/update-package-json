@@ -34,7 +34,7 @@ export function getSignatureKey(
 export function buildRowData(manifest: VersionManifest, version: string) {
   const directDependencies = getDirectDependencies(manifest, version)
   const dependencyValues = Object.fromEntries(directDependencies.map(entry => [
-    entry.name,
+    entry.columnKey,
     entry.matchesPackageVersion ? DEPENDENCY_EXPLORER_SAME_VALUE : entry.displayRange,
   ]))
 
@@ -46,18 +46,16 @@ export function buildRowData(manifest: VersionManifest, version: string) {
   }
 }
 
-export function finalizeRows(rowsByKey: Map<string, DependencyExplorerRow>): DependencyExplorerRow[] {
-  return Array.from(rowsByKey.values())
-    .map(row => {
-      const descending = [...row.versions].sort(compareVersionsDescending)
-      return {
-        ...row,
-        versions: descending,
-        newestVersion: descending[0] ?? row.newestVersion,
-        oldestVersion: [...row.versions].sort((left, right) => semver.compare(left, right))[0] ?? row.oldestVersion,
-      }
-    })
-    .sort((left, right) => compareVersionsDescending(left.newestVersion, right.newestVersion))
+export function finalizeRows(rows: DependencyExplorerRow[]): DependencyExplorerRow[] {
+  return rows.map(row => {
+    const descending = [...row.versions].sort(compareVersionsDescending)
+    return {
+      ...row,
+      versions: descending,
+      newestVersion: descending[0] ?? row.newestVersion,
+      oldestVersion: [...row.versions].sort((left, right) => semver.compare(left, right))[0] ?? row.oldestVersion,
+    }
+  })
 }
 
 export function getVisibleRowVersions(row: DependencyExplorerRow, visibleMajors: Set<number>): string[] {
