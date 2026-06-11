@@ -62,19 +62,6 @@ npm install
 npm run dev
 ```
 
-To point the frontend at a custom npm proxy service during local work or deployment, set:
-
-```bash
-VITE_NPM_SERVICE_BASE_URL=https://app.my-grapes.com/npm
-```
-
-If unset, the app defaults to:
-
-- `http://127.0.0.1:8080/npm` in local dev
-- `https://app.my-grapes.com/npm` in production builds
-
-If the service is temporarily unavailable, the npm lookup layer falls back to the public npm registry so the app still works.
-
 If `web/package-lock.json` is present, `make install-web` uses `npm ci`; otherwise it falls back to `npm install`.
 
 ## How the app behaves

@@ -24,38 +24,10 @@ export interface Packument {
 
 const CACHE_TTL_MS = 60 * 60 * 1000 // 1 hour
 const REGISTRY = 'https://registry.npmjs.org'
-const NPM_SERVICE_BASE_URL = (
-  import.meta.env.VITE_NPM_SERVICE_BASE_URL
-  || (import.meta.env.DEV ? 'http://127.0.0.1:8080/npm' : 'https://app.my-grapes.com/npm')
-).replace(/\/+$/, '')
 
 interface CacheEntry {
   data: Packument
   fetchedAt: number
-}
-
-interface ServicePackumentResponse {
-  packageName: string
-  packument: Packument
-}
-
-interface ServiceUsageResponse {
-  ok: boolean
-  usage: {
-    packagesUpdatedTotal?: number
-  }
-}
-
-interface ServiceUsageEventResponse {
-  ok: boolean
-  packagesUpdatedTotal: number
-}
-
-function encodePackagePath(pkg: string): string {
-  return pkg
-    .split('/')
-    .map(part => encodeURIComponent(part))
-    .join('/')
 }
 
 function cacheKey(pkg: string) {
@@ -90,18 +62,7 @@ export async function fetchPackument(pkg: string): Promise<Packument> {
   const cached = getFromCache(pkg)
   if (cached) return cached
 
-  try {
-    const serviceResponse = await fetch(`${NPM_SERVICE_BASE_URL}/api/packument/${encodePackagePath(pkg)}`)
-    if (serviceResponse.ok) {
-      const data = await serviceResponse.json() as ServicePackumentResponse
-      saveToCache(pkg, data.packument)
-      return data.packument
-    }
-  } catch {
-    // Fall back to the public registry if the proxy service is unavailable.
-  }
-
-  const res = await fetch(`${REGISTRY}/${encodePackagePath(pkg)}`, {
+  const res = await fetch(`${REGISTRY}/${encodeURIComponent(pkg)}`, {
     headers: { Accept: 'application/vnd.npm.install-v1+json' },
   })
 
@@ -179,46 +140,4 @@ export async function fetchLatestNpmVersion(): Promise<string> {
   const latest = getPreferredStableVersions(npmPackument)[0] || newestStable(getAllVersions(npmPackument))
   if (!latest) throw new Error('Unable to determine the latest npm version')
   return latest
-}
-
-export async function fetchPackagesUpdatedTotal(): Promise<number> {
-  try {
-    const response = await fetch(`${NPM_SERVICE_BASE_URL}/api/usage`)
-    if (!response.ok) {
-      throw new Error(`Usage request failed with ${response.status}`)
-    }
-
-    const data = await response.json() as ServiceUsageResponse
-    return typeof data.usage?.packagesUpdatedTotal === 'number' ? data.usage.packagesUpdatedTotal : 0
-  } catch {
-    return 0
-  }
-}
-
-export async function recordPackagesUpdated(count: number): Promise<number | null> {
-  if (!Number.isFinite(count) || count <= 0) {
-    return null
-  }
-
-  try {
-    const response = await fetch(`${NPM_SERVICE_BASE_URL}/api/usage/event`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        eventType: 'packages_updated',
-        count: Math.floor(count),
-      }),
-    })
-
-    if (!response.ok) {
-      throw new Error(`Usage event request failed with ${response.status}`)
-    }
-
-    const data = await response.json() as ServiceUsageEventResponse
-    return typeof data.packagesUpdatedTotal === 'number' ? data.packagesUpdatedTotal : null
-  } catch {
-    return null
-  }
 }
