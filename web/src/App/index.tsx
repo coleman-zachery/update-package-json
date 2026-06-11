@@ -42,10 +42,16 @@ import {
   OPTION_BUTTONS,
 } from '@/App/constants'
 import { buildApplyFixesInput } from '@/App/auditFixes'
-import { loadNpmModule, loadResolverModule } from '@/App/moduleLoaders'
+import { loadResolverModule } from '@/App/moduleLoaders'
 import { getPreferredFrozenSection, syncRestrictions } from '@/App/restrictions'
 import { useInputValidation } from '@/App/useInputValidation'
 import { useLatestVersions } from '@/App/useLatestVersions'
+import {
+  fetchLatestNodeVersion,
+  fetchLatestNpmVersion,
+  fetchPackagesUpdatedTotal,
+  recordPackagesUpdated,
+} from '@/lib/npm'
 import './index.css'
 
 type PendingAction = 'update' | 'apply-fixes'
@@ -54,6 +60,44 @@ const MAX_APPLY_FIXES_PASSES = 8
 function getPendingForcedOverrideNames(result: ResolveResult): string[] {
   const existingOverrideNames = new Set(Object.keys(getStringOverrides(result.updatedPackage)))
   return result.staleDependencyNames.filter(name => !existingOverrideNames.has(name))
+}
+
+function buildOutputPackage(
+  result: ResolveResult,
+  forcedOverrideNames: string[],
+  majorBuildsActive: boolean,
+) {
+  const packageWithForcedOverrides = forcedOverrideNames.length > 0
+    ? forceDependenciesIntoOverrides(result.updatedPackage, forcedOverrideNames)
+    : result.updatedPackage
+  const overriddenDependencyNames = new Set(Object.keys(getStringOverrides(packageWithForcedOverrides)))
+  const majorBuildCandidateNames = result.latestDependencyNames.filter(name => !overriddenDependencyNames.has(name))
+
+  return majorBuildsActive
+    ? applyMajorBuildRanges(packageWithForcedOverrides, majorBuildCandidateNames)
+    : packageWithForcedOverrides
+}
+
+function toStableJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(item => toStableJson(item)).join(',')}]`
+  }
+
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, nestedValue]) => `${JSON.stringify(key)}:${toStableJson(nestedValue)}`)
+
+    return `{${entries.join(',')}}`
+  }
+
+  return JSON.stringify(value)
+}
+
+function didProduceChangedOutput(inputText: string, result: ResolveResult): boolean {
+  const inputPackage = parsePackageJson(inputText)
+  const outputPackage = buildOutputPackage(result, getPendingForcedOverrideNames(result), true)
+  return toStableJson(inputPackage) !== toStableJson(outputPackage)
 }
 
 export default function App() {
@@ -76,6 +120,7 @@ export default function App() {
     canApply: boolean
     applyDisabledReason?: string
   } | null>(null)
+  const [packagesUpdatedTotal, setPackagesUpdatedTotal] = useState<number | null>(null)
   const pendingIndentAutoDetectRef = useRef(false)
   const dependencyExplorerRequestIdRef = useRef(0)
 
@@ -103,15 +148,7 @@ export default function App() {
       return null
     }
 
-    const packageWithForcedOverrides = forcedOverrideNames.length > 0
-      ? forceDependenciesIntoOverrides(result.updatedPackage, forcedOverrideNames)
-      : result.updatedPackage
-    const overriddenDependencyNames = new Set(Object.keys(getStringOverrides(packageWithForcedOverrides)))
-    const majorBuildCandidateNames = result.latestDependencyNames.filter(name => !overriddenDependencyNames.has(name))
-
-    return majorBuildsActive
-      ? applyMajorBuildRanges(packageWithForcedOverrides, majorBuildCandidateNames)
-      : packageWithForcedOverrides
+    return buildOutputPackage(result, forcedOverrideNames, majorBuildsActive)
   }, [forcedOverrideNames, majorBuildsActive, result])
 
   const outputJson = useMemo(() => {
@@ -129,6 +166,26 @@ export default function App() {
   useEffect(() => {
     setRestrictions(current => syncRestrictions(current, input, restrictableEntries))
   }, [input, restrictableEntries])
+
+  useEffect(() => {
+    let cancelled = false
+
+    void fetchPackagesUpdatedTotal()
+      .then(total => {
+        if (!cancelled) {
+          setPackagesUpdatedTotal(total)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPackagesUpdatedTotal(0)
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     const nextRespectNode = Boolean(restrictions[getRestrictionKey('engines', 'node')])
@@ -166,6 +223,20 @@ export default function App() {
     try {
       const { resolvePackageJson } = await loadResolverModule()
       const nextResult = await resolvePackageJson(nextInput, options, nextRestrictions)
+      const outputChanged = didProduceChangedOutput(nextInput, nextResult)
+
+      if (outputChanged) {
+        void recordPackagesUpdated(1)
+          .then(total => {
+            if (typeof total === 'number') {
+              setPackagesUpdatedTotal(total)
+            }
+          })
+          .catch(() => {
+            // Ignore analytics/update counter failures.
+          })
+      }
+
       setForcedOverrideNames(getPendingForcedOverrideNames(nextResult))
       setMajorBuildsActive(true)
       setResult(nextResult)
@@ -228,6 +299,19 @@ export default function App() {
         workingResult = await resolvePackageJson(workingInput, options, workingRestrictions)
       }
 
+      const outputChanged = didProduceChangedOutput(workingInput, workingResult)
+      if (outputChanged) {
+        void recordPackagesUpdated(1)
+          .then(total => {
+            if (typeof total === 'number') {
+              setPackagesUpdatedTotal(total)
+            }
+          })
+          .catch(() => {
+            // Ignore analytics/update counter failures.
+          })
+      }
+
       setInput(workingInput)
       setRestrictions(workingRestrictions)
       setForcedOverrideNames(getPendingForcedOverrideNames(workingResult))
@@ -256,7 +340,6 @@ export default function App() {
   }
 
   async function getLatestEngineVersion(engineName: EngineName): Promise<string> {
-    const { fetchLatestNodeVersion, fetchLatestNpmVersion } = await loadNpmModule()
     return engineName === 'node' ? fetchLatestNodeVersion() : fetchLatestNpmVersion()
   }
 
@@ -677,6 +760,11 @@ export default function App() {
       <OptionsBar
         engineButtons={engineButtons}
         optionButtons={optionButtons}
+        utility={(
+          <span className="options-bar__summary">
+            packages updated: {packagesUpdatedTotal ?? '...'}
+          </span>
+        )}
         onEngineClick={handleEngineButton}
         onOptionClick={toggleOption}
       />

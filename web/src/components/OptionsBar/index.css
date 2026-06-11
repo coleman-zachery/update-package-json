@@ -25,6 +25,14 @@
   min-width: max-content;
 }
 
+.options-bar__summary {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
 .options-toggle {
   display: flex;
   flex-direction: column;

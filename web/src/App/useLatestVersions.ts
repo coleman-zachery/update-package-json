@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { EngineName } from '@/lib/resolver'
-import { loadNpmModule } from '@/App/moduleLoaders'
+import { fetchLatestNodeVersion, fetchLatestNpmVersion } from '@/lib/npm'
 
 const EMPTY_LATEST_VERSIONS: Record<EngineName, string> = {
   node: '',
@@ -13,9 +13,7 @@ export function useLatestVersions(): Record<EngineName, string> {
   useEffect(() => {
     let cancelled = false
 
-    void loadNpmModule()
-      .then(({ fetchLatestNodeVersion, fetchLatestNpmVersion }) =>
-        Promise.allSettled([fetchLatestNodeVersion(), fetchLatestNpmVersion()]))
+    void Promise.allSettled([fetchLatestNodeVersion(), fetchLatestNpmVersion()])
       .then(([nodeResult, npmResult]) => {
         if (cancelled) {
           return
