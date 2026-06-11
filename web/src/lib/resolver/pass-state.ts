@@ -104,19 +104,24 @@ export async function ensureState(
     return existing
   }
 
+  ctx.registerTraversal(name)
+
   try {
     const nextState = await buildPackageState(ctx, name, section, currentValue, restrictedRange, root)
     if (!nextState) {
       if (root) ctx.conflicts.push(`${name}: unable to resolve a published version`)
       else ctx.recordUnresolvedPeerRequest(name, currentValue ?? '', section, source)
+      ctx.completeTraversal(name)
       return null
     }
     ctx.states.set(name, nextState)
     ctx.unresolvedPeerRequests.delete(name)
+    ctx.completeTraversal(name)
     return nextState
   } catch (e) {
     if (root) ctx.conflicts.push(`${name}: ${(e as Error).message}`)
     else ctx.recordUnresolvedPeerRequest(name, currentValue ?? '', section, source)
+    ctx.completeTraversal(name)
     return null
   }
 }

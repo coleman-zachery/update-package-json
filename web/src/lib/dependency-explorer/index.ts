@@ -5,8 +5,10 @@ export {
 } from './inspect'
 export { getVisibleRowVersions } from './rows'
 export type {
+  DependencyExplorerColumn,
   DependencyExplorerContextSection,
   DependencyExplorerDependencyEntry,
+  DependencyExplorerPlatformDependency,
   DependencyExplorerReport,
   DependencyExplorerRow,
 } from './types'

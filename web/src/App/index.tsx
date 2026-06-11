@@ -12,9 +12,17 @@ import {
 } from '@/lib/indentation'
 import type {
   EngineName,
+  ResolveProgress,
   ResolveOptions,
   ResolveResult,
 } from '@/lib/resolver'
+import {
+  coercePlatformSelection,
+  DEFAULT_PLATFORM_SELECTION,
+  getPlatformSelectorState,
+  normalizePlatformSelection,
+  type PlatformSelection,
+} from '@/lib/resolver/platform-targets'
 import {
   applyMajorBuildRanges,
   forceDependenciesIntoOverrides,
@@ -50,6 +58,36 @@ import './index.css'
 
 type PendingAction = 'update' | 'apply-fixes'
 const MAX_APPLY_FIXES_PASSES = 8
+const PLATFORM_SELECTION_STORAGE_KEY = 'upj-platform-selection'
+const PLATFORM_SELECTION_RESOLVE_DEBOUNCE_MS = 220
+
+function readStoredPlatformSelection(): PlatformSelection {
+  try {
+    const raw = localStorage.getItem(PLATFORM_SELECTION_STORAGE_KEY)
+    if (!raw) {
+      return normalizePlatformSelection(DEFAULT_PLATFORM_SELECTION)
+    }
+
+    const parsed = JSON.parse(raw)
+    return normalizePlatformSelection({
+      ...DEFAULT_PLATFORM_SELECTION,
+      ...(parsed && typeof parsed === 'object' ? parsed : {}),
+    })
+  } catch {
+    return normalizePlatformSelection(DEFAULT_PLATFORM_SELECTION)
+  }
+}
+
+function writeStoredPlatformSelection(selection: PlatformSelection) {
+  try {
+    localStorage.setItem(
+      PLATFORM_SELECTION_STORAGE_KEY,
+      JSON.stringify(normalizePlatformSelection(selection)),
+    )
+  } catch {
+    // ignore storage failures
+  }
+}
 
 function getPendingForcedOverrideNames(result: ResolveResult): string[] {
   const existingOverrideNames = new Set(Object.keys(getStringOverrides(result.updatedPackage)))
@@ -63,11 +101,14 @@ export default function App() {
   const [result, setResult] = useState<ResolveResult | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState('')
+  const [resolveProgress, setResolveProgress] = useState<ResolveProgress | null>(null)
   const [pendingEngine, setPendingEngine] = useState<EngineName | null>(null)
   const [restrictions, setRestrictions] = useState<Record<string, boolean>>({})
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [forcedOverrideNames, setForcedOverrideNames] = useState<string[]>([])
   const [majorBuildsActive, setMajorBuildsActive] = useState(true)
+  const [platformSelection, setPlatformSelection] = useState<PlatformSelection>(() => readStoredPlatformSelection())
+  const [platformAvailableTargets, setPlatformAvailableTargets] = useState<string[]>([])
   const [dependencyExplorerRequest, setDependencyExplorerRequest] = useState<{
     id: number
     packageName: string
@@ -78,6 +119,7 @@ export default function App() {
   } | null>(null)
   const pendingIndentAutoDetectRef = useRef(false)
   const dependencyExplorerRequestIdRef = useRef(0)
+  const platformSelectionResolveTimeoutRef = useRef<number | null>(null)
 
   const latestVersions = useLatestVersions()
   const inputValidation = useInputValidation(input)
@@ -152,20 +194,39 @@ export default function App() {
     })
   }, [restrictions])
 
+  useEffect(() => {
+    return () => {
+      if (platformSelectionResolveTimeoutRef.current !== null) {
+        window.clearTimeout(platformSelectionResolveTimeoutRef.current)
+      }
+    }
+  }, [])
+
   async function runUpdatePackage(
     nextInput: string,
     nextRestrictions: Record<string, boolean>,
     action: PendingAction,
+    nextPlatformSelection: PlatformSelection = platformSelection,
   ) {
+    if (platformSelectionResolveTimeoutRef.current !== null) {
+      window.clearTimeout(platformSelectionResolveTimeoutRef.current)
+      platformSelectionResolveTimeoutRef.current = null
+    }
+
     setPendingAction(action)
     setForcedOverrideNames([])
     setStatus('loading')
     setResult(null)
     setErrorMsg('')
+    setResolveProgress(null)
 
     try {
       const { resolvePackageJson } = await loadResolverModule()
-      const nextResult = await resolvePackageJson(nextInput, options, nextRestrictions)
+      const nextResult = await resolvePackageJson(nextInput, options, nextRestrictions, {
+        platformSelection: nextPlatformSelection,
+        onProgress: setResolveProgress,
+      })
+      setPlatformAvailableTargets(nextResult.platformSupport.availableTargets)
       setForcedOverrideNames(getPendingForcedOverrideNames(nextResult))
       setMajorBuildsActive(true)
       setResult(nextResult)
@@ -192,6 +253,7 @@ export default function App() {
     setStatus('loading')
     setResult(null)
     setErrorMsg('')
+    setResolveProgress(null)
 
     try {
       const { resolvePackageJson } = await loadResolverModule()
@@ -225,11 +287,15 @@ export default function App() {
         seenStates.add(stateKey)
         workingInput = nextInput
         workingRestrictions = nextRestrictions
-        workingResult = await resolvePackageJson(workingInput, options, workingRestrictions)
+        workingResult = await resolvePackageJson(workingInput, options, workingRestrictions, {
+          platformSelection,
+          onProgress: setResolveProgress,
+        })
       }
 
       setInput(workingInput)
       setRestrictions(workingRestrictions)
+      setPlatformAvailableTargets(workingResult.platformSupport.availableTargets)
       setForcedOverrideNames(getPendingForcedOverrideNames(workingResult))
       setMajorBuildsActive(true)
       setResult(workingResult)
@@ -395,7 +461,7 @@ export default function App() {
     packageName: string,
     versionSpec: string,
     freeze: boolean,
-  ) {
+  ): Promise<ReturnType<typeof parsePackageJson>> {
     const inputPackage = input.trim() ? parsePackageJson(input) : {}
     const preferredSection =
       inputPackage.dependencies?.[packageName] ? 'dependencies'
@@ -434,6 +500,8 @@ export default function App() {
     if (errorMsg) {
       setErrorMsg('')
     }
+
+    return parsePackageJson(nextInput)
   }
 
   function handleForceOverrides() {
@@ -456,6 +524,50 @@ export default function App() {
 
   function handleMajorBuildsToggle() {
     setMajorBuildsActive(current => !current)
+  }
+
+  const platformSelectorState = useMemo(
+    () => getPlatformSelectorState(platformAvailableTargets, platformSelection),
+    [platformAvailableTargets, platformSelection],
+  )
+
+  useEffect(() => {
+    const nextSelection = coercePlatformSelection(platformAvailableTargets, platformSelection)
+    if (
+      nextSelection.os === platformSelection.os
+      && nextSelection.arch === platformSelection.arch
+      && nextSelection.runtime === platformSelection.runtime
+    ) {
+      return
+    }
+
+    setPlatformSelection(nextSelection)
+    writeStoredPlatformSelection(nextSelection)
+  }, [platformAvailableTargets, platformSelection])
+
+  function handlePlatformSelectionChange(
+    key: keyof PlatformSelection,
+    value: string,
+  ) {
+    const nextSelection = coercePlatformSelection(platformAvailableTargets, normalizePlatformSelection({
+      ...platformSelection,
+      [key]: value || undefined,
+    }))
+    setPlatformSelection(nextSelection)
+    writeStoredPlatformSelection(nextSelection)
+
+    if (!input.trim()) {
+      return
+    }
+
+    if (platformSelectionResolveTimeoutRef.current !== null) {
+      window.clearTimeout(platformSelectionResolveTimeoutRef.current)
+    }
+
+    platformSelectionResolveTimeoutRef.current = window.setTimeout(() => {
+      platformSelectionResolveTimeoutRef.current = null
+      void runUpdatePackage(input, restrictions, 'update', nextSelection)
+    }, PLATFORM_SELECTION_RESOLVE_DEBOUNCE_MS)
   }
 
   function handleInspectDependency(packageName: string, source: 'input' | 'output') {
@@ -668,6 +780,7 @@ export default function App() {
             contextSourceLabel={explorerContext.sourceLabel}
             canApply={explorerContext.canApply}
             applyDisabledReason={explorerContext.applyDisabledReason}
+            includeOptionalPeerDeps={options.addOptionalPeerDeps}
             onApplyVersion={handleApplyDependencyVersion}
             openRequest={dependencyExplorerRequest}
           />
@@ -677,6 +790,12 @@ export default function App() {
       <OptionsBar
         engineButtons={engineButtons}
         optionButtons={optionButtons}
+        platformSelectors={{
+          ...platformSelectorState,
+          selection: platformSelection,
+          disabled: status === 'loading' || pendingEngine !== null,
+          onChange: (key, value) => void handlePlatformSelectionChange(key, value),
+        }}
         onEngineClick={handleEngineButton}
         onOptionClick={toggleOption}
       />
@@ -703,6 +822,7 @@ export default function App() {
           <ChangesPane
             result={result}
             status={status}
+            progress={resolveProgress}
             onApplyFixes={() => void handleApplyFixes()}
             applyFixesDisabled={status === 'loading' || pendingEngine !== null}
             applyFixesLabel={status === 'loading' && pendingAction === 'apply-fixes' ? 'Applying…' : 'Apply Fixes'}

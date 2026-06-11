@@ -6,15 +6,36 @@ import { getDependencyRangeCandidates, getPreferredSection } from './state-helpe
 import type {
   DependencySection,
   PackageState,
+  ResolvePreferences,
+  ResolveProgress,
   ResolveOptions,
   UnresolvedPeerRequest,
 } from './types'
 import type { PackageJson } from '@/lib/package-json'
+import type { PlatformSelection } from './platform-targets'
 
 interface InstallTargetAnalysis {
   latestSatisfyingVersion: string | null
   latestEngineCompatibleVersion: string | null
   latestSatisfyingIsEngineCompatible: boolean
+}
+
+const PROGRESS_ROOT_SECTIONS: DependencySection[] = [
+  'dependencies',
+  'devDependencies',
+  'peerDependencies',
+]
+
+function countInitialTraversalTargets(pkg: PackageJson): number {
+  const names = new Set<string>()
+
+  for (const section of PROGRESS_ROOT_SECTIONS) {
+    for (const name of Object.keys(pkg[section] ?? {})) {
+      names.add(name)
+    }
+  }
+
+  return names.size
 }
 
 export interface ResolutionContext {
@@ -33,8 +54,11 @@ export interface ResolutionContext {
   states: Map<string, PackageState>
   unresolvedPeerRequests: Map<string, UnresolvedPeerRequest>
   shouldAutoTransitiveEngineOverrides: boolean
+  requestedPlatformSelection: PlatformSelection
   recommendedUnfreezeNames: Set<string>
   fixRecommendations: Set<string>
+  registerTraversal(name: string): void
+  completeTraversal(name: string): void
   getPackumentCached(name: string): Promise<Awaited<ReturnType<typeof fetchPackument>>>
   getSortedStableVersions(packument: Awaited<ReturnType<typeof fetchPackument>>): string[]
   recommendUnfreeze(name: string, reason: string): void
@@ -54,9 +78,21 @@ export function createResolutionContext(
   rootNpm: string | undefined,
   respectNode: boolean,
   respectNpm: boolean,
+  preferences: ResolvePreferences = {},
 ): ResolutionContext {
   const packumentCache = new Map<string, Awaited<ReturnType<typeof fetchPackument>>>()
   const installTargetCache = new Map<string, InstallTargetAnalysis>()
+  const initialTraversalTotal = countInitialTraversalTargets(pkg)
+  const discoveredTraversalNames = new Set<string>()
+  const completedTraversalNames = new Set<string>()
+
+  function emitProgress() {
+    preferences.onProgress?.({
+      completed: completedTraversalNames.size,
+      total: Math.max(initialTraversalTotal, discoveredTraversalNames.size, completedTraversalNames.size),
+    } satisfies ResolveProgress)
+  }
+
   const ctx: ResolutionContext = {
     pkg,
     options,
@@ -73,8 +109,25 @@ export function createResolutionContext(
     states: new Map(),
     unresolvedPeerRequests: new Map(),
     shouldAutoTransitiveEngineOverrides: pkg.engineStrict === true,
+    requestedPlatformSelection: preferences.platformSelection ?? {},
     recommendedUnfreezeNames: new Set(),
     fixRecommendations: new Set(),
+    registerTraversal(name) {
+      if (discoveredTraversalNames.has(name)) {
+        return
+      }
+
+      discoveredTraversalNames.add(name)
+      emitProgress()
+    },
+    completeTraversal(name) {
+      if (!discoveredTraversalNames.has(name) || completedTraversalNames.has(name)) {
+        return
+      }
+
+      completedTraversalNames.add(name)
+      emitProgress()
+    },
     async getPackumentCached(name) {
       const cached = packumentCache.get(name)
       if (cached) return cached
@@ -152,5 +205,7 @@ export function createResolutionContext(
       return sources.join(', ') || 'unknown'
     },
   }
+
+  emitProgress()
   return ctx
 }

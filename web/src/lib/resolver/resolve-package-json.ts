@@ -8,12 +8,13 @@ import { getPinnedPackageManagerVersion, getTrimmedString, selectDeclaredNpmValu
 import { resolveWithEngines } from './resolve-with-engines'
 import { isMeaningfulDependencyChange, sortOverrideEntries } from './state-helpers'
 import { validateDeclaredEngines, validateDeclaredPackageManager } from './validation'
-import type { DependencySection, EngineName, ResolveOptions, ResolveResult, VersionChange } from './types'
+import type { DependencySection, EngineName, ResolveOptions, ResolvePreferences, ResolveResult, VersionChange } from './types'
 
 export async function resolvePackageJson(
   raw: string,
   options: ResolveOptions,
   restrictions: RestrictionState = {},
+  preferences: ResolvePreferences = {},
 ): Promise<ResolveResult> {
   const pkg = parsePackageJson(raw)
   const changes: VersionChange[] = []
@@ -36,7 +37,7 @@ export async function resolvePackageJson(
   const shouldRetainDetachedPackageManager = hasDetachedNpmRange && restrictedPackageManagerNpm && !packageManagerIssue && Boolean(inputPackageManagerVersion)
   let workingRootNode = !respectNode ? await fetchLatestNodeVersion().catch(() => rootNode) : rootNode
   let workingRootNpm = !respectNpm ? await fetchLatestNpmVersion().catch(() => rootNpm) : rootNpm
-  let resolution = await resolveWithEngines(pkg, options, restrictions, workingRootNode, workingRootNpm, Boolean(workingRootNode), Boolean(workingRootNpm))
+  let resolution = await resolveWithEngines(pkg, options, restrictions, workingRootNode, workingRootNpm, Boolean(workingRootNode), Boolean(workingRootNpm), preferences)
 
   for (let pass = 0; pass < 3; pass++) {
     const nextRootNode = await pickCompatibleEngineVersion('node', rootNode, resolution.resolvedManifests, respectNode, restrictedNode, options.addEnginesNode, options.avoidLatestVersions)
@@ -44,7 +45,7 @@ export async function resolvePackageJson(
     if ((nextRootNode ?? '') === (workingRootNode ?? '') && (nextRootNpm ?? '') === (workingRootNpm ?? '')) break
     workingRootNode = nextRootNode ?? workingRootNode
     workingRootNpm = nextRootNpm ?? workingRootNpm
-    resolution = await resolveWithEngines(pkg, options, restrictions, workingRootNode, workingRootNpm, Boolean(workingRootNode), Boolean(workingRootNpm))
+    resolution = await resolveWithEngines(pkg, options, restrictions, workingRootNode, workingRootNpm, Boolean(workingRootNode), Boolean(workingRootNpm), preferences)
   }
 
   const resolvedSections = { dependencies: resolution.deps, devDependencies: resolution.devDeps, peerDependencies: resolution.peerDeps }
@@ -106,5 +107,6 @@ export async function resolvePackageJson(
     engineOverrides: [...engineOverrides, ...resolution.transitiveOverrides.map(override => `${override.source}: pinned transitive ${override.name}@${override.version} in overrides to satisfy engine constraints`)],
     recommendedUnfreezeNames,
     fixRecommendations,
+    platformSupport: resolution.platformSupport,
   }
 }

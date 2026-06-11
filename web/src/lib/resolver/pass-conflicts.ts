@@ -10,6 +10,10 @@ function getDependentsForPeer(ctx: ResolutionContext, peerName: string): Array<{
     .flatMap(state => state.peerDependencies[peerName] ? [{ dependent: state, requiredRange: state.peerDependencies[peerName].range }] : [])
 }
 
+function getCandidateSearchOrder(state: PackageState): string[] {
+  return Array.from(new Set(state.candidateVersions))
+}
+
 function getDependentsForSharedDependency(
   ctx: ResolutionContext,
   dependencyName: string,
@@ -22,14 +26,14 @@ function getDependentsForSharedDependency(
 }
 
 function findCompatibleDowngrade(state: PackageState, dependents: Array<{ requiredRange: string }>): string | null {
-  return state.candidateVersions.slice(state.currentIndex).find(candidate =>
+  return getCandidateSearchOrder(state).find(candidate =>
     dependents.every(({ requiredRange }) => semver.satisfies(candidate, requiredRange)),
   ) ?? null
 }
 
 async function findDependentVersionForPeer(ctx: ResolutionContext, dependent: PackageState, peerName: string, peerVersion: string): Promise<string | null> {
   const packument = await ctx.getPackumentCached(dependent.name)
-  for (const candidate of dependent.candidateVersions.slice(dependent.currentIndex)) {
+  for (const candidate of getCandidateSearchOrder(dependent)) {
     const requiredRange = getRequiredPeerDependencies(packument.versions[candidate])[peerName]?.range
     if (!requiredRange || semver.satisfies(peerVersion, requiredRange)) return candidate
   }
@@ -38,7 +42,7 @@ async function findDependentVersionForPeer(ctx: ResolutionContext, dependent: Pa
 
 async function findDependentVersionForSharedDependency(ctx: ResolutionContext, dependent: PackageState, dependencyName: string, dependencyVersion: string): Promise<string | null> {
   const packument = await ctx.getPackumentCached(dependent.name)
-  for (const candidate of dependent.candidateVersions.slice(dependent.currentIndex)) {
+  for (const candidate of getCandidateSearchOrder(dependent)) {
     const requiredRange = getSharedDependencyRequirement(packument.versions[candidate], dependencyName)
     if (!requiredRange || !semver.validRange(requiredRange) || semver.satisfies(dependencyVersion, requiredRange)) return candidate
   }

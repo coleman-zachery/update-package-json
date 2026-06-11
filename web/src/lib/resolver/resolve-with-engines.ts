@@ -3,9 +3,15 @@ import type { RestrictionState } from '@/lib/restrictions'
 import { createResolutionContext } from './pass-context'
 import { stabilizeResolutionGraph } from './pass-conflicts'
 import { runAuditPass } from './audit-pass'
+import { collectCompanionRootRequests } from './companions'
+import { collectNativeOptionalRootRequests } from './native-optional-requests'
 import { ensureState, syncPeerGraph } from './pass-state'
 import { getRestrictionRange } from './state-helpers'
-import type { AddedPeerDep, DependencySection, ResolutionPass, ResolveOptions } from './types'
+import type { AddedPeerDep, DependencySection, ResolutionPass, ResolveOptions, ResolvePreferences } from './types'
+
+function dedupePreservingOrder(values: string[]): string[] {
+  return Array.from(new Set(values))
+}
 
 export async function resolveWithEngines(
   pkg: PackageJson,
@@ -15,8 +21,9 @@ export async function resolveWithEngines(
   rootNpm: string | undefined,
   respectNode: boolean,
   respectNpm: boolean,
+  preferences: ResolvePreferences = {},
 ): Promise<ResolutionPass> {
-  const ctx = createResolutionContext(pkg, options, restrictions, rootNode, rootNpm, respectNode, respectNpm)
+  const ctx = createResolutionContext(pkg, options, restrictions, rootNode, rootNpm, respectNode, respectNpm, preferences)
   const rootSections: Array<[DependencySection, Record<string, string> | undefined]> = [['dependencies', pkg.dependencies], ['devDependencies', pkg.devDependencies], ['peerDependencies', pkg.peerDependencies]]
 
   for (const [sectionName, sectionValues] of rootSections) {
@@ -24,6 +31,32 @@ export async function resolveWithEngines(
     for (const [name, currentValue] of Object.entries(sectionValues)) {
       await ensureState(ctx, name, sectionName, currentValue, getRestrictionRange(restrictions, sectionName, name, currentValue), true)
     }
+  }
+
+  for (const request of collectCompanionRootRequests(pkg)) {
+    await ensureState(
+      ctx,
+      request.name,
+      request.section,
+      request.currentValue,
+      request.requestedRange,
+      true,
+      request.sourceName,
+    )
+  }
+
+  const { requests: nativeOptionalRequests, platformSupport } = await collectNativeOptionalRootRequests(ctx, pkg)
+
+  for (const request of nativeOptionalRequests) {
+    await ensureState(
+      ctx,
+      request.name,
+      request.section,
+      request.currentValue,
+      request.requestedRange,
+      true,
+      request.sourceName,
+    )
   }
 
   await syncPeerGraph(ctx)
@@ -57,7 +90,7 @@ export async function resolveWithEngines(
     peerDeps: ctx.peerDeps,
     auditStatus,
     addedPeerDeps,
-    conflicts: ctx.conflicts,
+    conflicts: dedupePreservingOrder(ctx.conflicts),
     engineWarnings: ctx.engineWarnings,
     latestDependencyNames,
     staleDependencyNames,
@@ -66,5 +99,6 @@ export async function resolveWithEngines(
     transitiveOverrideWarnings,
     recommendedUnfreezeNames: Array.from(ctx.recommendedUnfreezeNames).sort((left, right) => left.localeCompare(right)),
     fixRecommendations: Array.from(ctx.fixRecommendations).sort((left, right) => left.localeCompare(right)),
+    platformSupport,
   }
 }

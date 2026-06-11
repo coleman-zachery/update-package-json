@@ -1,5 +1,6 @@
 import type { PackageJson, NpmDeclarationSource } from '@/lib/package-json'
 import type { VersionManifest } from '@/lib/npm'
+import type { PlatformSelection } from './platform-targets'
 
 export interface ResolveOptions {
   respectEnginesNode: boolean
@@ -48,6 +49,7 @@ export interface ResolveResult {
   engineOverrides: string[]
   recommendedUnfreezeNames: string[]
   fixRecommendations: string[]
+  platformSupport: PlatformSupport
 }
 
 export interface EngineValidationIssue {
@@ -112,9 +114,43 @@ export interface ResolutionPass {
   transitiveOverrideWarnings: string[]
   recommendedUnfreezeNames: string[]
   fixRecommendations: string[]
+  platformSupport: PlatformSupport
 }
 
 export interface CandidateVersionAnalysis {
   dependencyCompatibleCandidates: string[]
   overrideCompatibleCandidates: string[]
+}
+
+export interface ResolveProgress {
+  completed: number
+  total: number
+}
+
+export interface ResolvePreferences {
+  platformSelection?: PlatformSelection
+  onProgress?: (progress: ResolveProgress) => void
+}
+
+export interface PlatformResolutionIssue {
+  source: 'toolbar' | 'inferred'
+  requested: string
+  reason: 'ambiguous' | 'no-match'
+  candidates: string[]
+}
+
+export interface PlatformOptionalFamily {
+  dependencyName: string
+  optionalDependencyNames: string[]
+  availableTargets: string[]
+  selectedTargets: string[]
+  issues: PlatformResolutionIssue[]
+}
+
+export interface PlatformSupport {
+  availableTargets: string[]
+  selectedTargets: string[]
+  inferredTargets: string[]
+  unresolvedTargets: string[]
+  families: PlatformOptionalFamily[]
 }
