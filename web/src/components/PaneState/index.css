@@ -45,6 +45,24 @@
   font-size: 0.72rem;
 }
 
+.pane-state__action {
+  padding: 6px 14px;
+  border: 1px solid var(--border-warn);
+  border-radius: 999px;
+  background: rgba(113, 67, 12, 0.16);
+  color: var(--warning);
+  font-size: 0.76rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.pane-state__action:hover {
+  border-color: var(--warning);
+  background: rgba(143, 82, 10, 0.28);
+  color: #fff2d6;
+}
+
 @keyframes pane-state-spin {
   to {
     transform: rotate(360deg);

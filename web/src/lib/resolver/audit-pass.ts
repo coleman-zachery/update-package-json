@@ -1,11 +1,12 @@
 import { fetchPackageAuditReports, type PackageAuditReport } from '@/lib/audit'
+import { isAbortError } from './abort'
 import { createUnavailableAuditStatus, formatAuditFinding } from './messages'
 import { setStateVersion, syncPeerGraph } from './pass-state'
 import { stabilizeResolutionGraph } from './pass-conflicts'
 import type { AuditStatus, PackageState } from './types'
 import type { ResolutionContext } from './pass-context'
 
-function createAuditManager() {
+function createAuditManager(ctx: ResolutionContext) {
   const reports = new Map<string, PackageAuditReport>()
   const getKey = (name: string, version: string) => `${name}@${version}`
 
@@ -13,7 +14,7 @@ function createAuditManager() {
     async prefetch(requests: Array<{ name: string; version: string }>) {
       const uncached = requests.filter(({ name, version }) => !reports.has(getKey(name, version)))
       if (uncached.length === 0) return
-      for (const [key, report] of await fetchPackageAuditReports(uncached)) reports.set(key, report)
+      for (const [key, report] of await fetchPackageAuditReports(uncached, ctx.signal)) reports.set(key, report)
     },
     async get(name: string, version: string) {
       const key = getKey(name, version)
@@ -57,10 +58,12 @@ function buildAuditStatus(ctx: ResolutionContext, reports: Array<{ state: Packag
 }
 
 export async function runAuditPass(ctx: ResolutionContext): Promise<AuditStatus> {
-  const audit = createAuditManager()
+  const audit = createAuditManager(ctx)
   try {
+    ctx.throwIfAborted()
     await audit.prefetch(Array.from(ctx.states.values()).map(state => ({ name: state.name, version: state.currentVersion })))
     for (let pass = 0; pass < 200; pass++) {
+      ctx.throwIfAborted()
       let changed = false
       const orderedStates = Array.from(ctx.states.values()).sort((left, right) => {
         if (left.root !== right.root) return left.root ? -1 : 1
@@ -68,6 +71,7 @@ export async function runAuditPass(ctx: ResolutionContext): Promise<AuditStatus>
         return left.name.localeCompare(right.name)
       })
       for (const state of orderedStates) {
+        ctx.throwIfAborted()
         const currentReport = await audit.get(state.name, state.currentVersion)
         if (currentReport.advisories.length === 0 || ctx.isStateRestricted(state)) continue
         const safeVersion = await findLatestSafeCandidate(audit, state)
@@ -82,9 +86,13 @@ export async function runAuditPass(ctx: ResolutionContext): Promise<AuditStatus>
     }
 
     const finalStates = Array.from(ctx.states.values()).sort((left, right) => left.name.localeCompare(right.name))
+    ctx.throwIfAborted()
     await audit.prefetch(finalStates.map(state => ({ name: state.name, version: state.currentVersion })))
     return buildAuditStatus(ctx, await Promise.all(finalStates.map(async state => ({ state, report: await audit.get(state.name, state.currentVersion) }))))
   } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
     return createUnavailableAuditStatus(error instanceof Error ? error.message : String(error))
   }
 }

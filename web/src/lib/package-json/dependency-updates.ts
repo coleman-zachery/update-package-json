@@ -70,3 +70,87 @@ export function upsertDependencyValue(
   cleanupEmptyDependencySections(updated)
   return serializeMutatedPackage(raw, updated, spaceIndentSize)
 }
+
+export function removeDependencyValue(
+  raw: string,
+  name: string,
+  spaceIndentSize?: SpaceIndentSize,
+): string {
+  const pkg = raw.trim() ? parsePackageJson(raw) : {}
+  const updated = clonePackageJsonForMutation(pkg)
+  let changed = false
+
+  for (const section of ROOT_DEPENDENCY_SECTIONS) {
+    const sectionValues = getDependencySectionValues(updated, section)
+    if (!sectionValues || !(name in sectionValues)) {
+      continue
+    }
+
+    const nextSectionValues = { ...sectionValues }
+    delete nextSectionValues[name]
+    updated[section] = Object.keys(nextSectionValues).length > 0
+      ? sortDependencies(nextSectionValues)
+      : undefined
+    changed = true
+  }
+
+  if (isPlainObject(updated.overrides) && name in updated.overrides) {
+    const nextOverrides = { ...updated.overrides }
+    delete nextOverrides[name]
+    updated.overrides = Object.keys(nextOverrides).length > 0
+      ? sortObjectEntries(nextOverrides)
+      : undefined
+    changed = true
+  }
+
+  if (!changed) {
+    return raw
+  }
+
+  cleanupEmptyDependencySections(updated)
+  return serializeMutatedPackage(raw, updated, spaceIndentSize)
+}
+
+export function removeDependenciesFromPackage(
+  pkg: PackageJson,
+  names: string[],
+): PackageJson {
+  if (names.length === 0) {
+    return pkg
+  }
+
+  const updated = clonePackageJsonForMutation(pkg)
+  let changed = false
+
+  for (const name of names) {
+    for (const section of ROOT_DEPENDENCY_SECTIONS) {
+      const sectionValues = getDependencySectionValues(updated, section)
+      if (!sectionValues || !(name in sectionValues)) {
+        continue
+      }
+
+      const nextSectionValues = { ...sectionValues }
+      delete nextSectionValues[name]
+      updated[section] = Object.keys(nextSectionValues).length > 0
+        ? sortDependencies(nextSectionValues)
+        : undefined
+      changed = true
+    }
+
+    if (isPlainObject(updated.overrides) && name in updated.overrides) {
+      const nextOverrides = { ...updated.overrides }
+      delete nextOverrides[name]
+      updated.overrides = Object.keys(nextOverrides).length > 0
+        ? sortObjectEntries(nextOverrides)
+        : undefined
+      changed = true
+    }
+  }
+
+  if (!changed) {
+    return pkg
+  }
+
+  cleanupEmptyDependencySections(updated)
+  return updated
+}

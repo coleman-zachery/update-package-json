@@ -23,7 +23,12 @@ interface Props {
   canApply: boolean
   applyDisabledReason?: string
   includeOptionalPeerDeps: boolean
-  onApplyVersion: (packageName: string, versionSpec: string, freeze: boolean) => Promise<PackageJson>
+  onApplyVersion: (
+    packageName: string,
+    versionSpec: string,
+    freeze: boolean,
+    remove?: boolean,
+  ) => Promise<PackageJson>
   openRequest?: DependencyExplorerOpenRequest | null
 }
 
@@ -54,6 +59,11 @@ interface ExplorerSessionContext {
   sourceLabel: string
   canApply: boolean
   applyDisabledReason?: string
+}
+
+interface InspectOptions {
+  preserveFilters?: boolean
+  silent?: boolean
 }
 
 function getInitialSelectedMajors(report: DependencyExplorerReport): number[] {
@@ -144,7 +154,12 @@ function createButtonTitle(
   targetVersion: string,
   latestVersion: string,
   freeze: boolean,
+  remove: boolean,
 ): string {
+  if (remove) {
+    return `Remove ${packageName} from package.json.`
+  }
+
   if (!freeze) {
     return `Add ${packageName}@${targetVersion} to package.json.`
   }
@@ -235,6 +250,8 @@ export function DependencyExplorer({
     () => createVisiblePlatformDependencies(report, visibleMajorSet),
     [report, visibleMajorSet],
   )
+  const hasDetailColumns = showEngineNodeColumn || showEngineNpmColumn || visibleColumns.length > 0
+  const latestMajor = report?.majorSeries[0] ?? null
 
   useEffect(() => {
     if (!open) {
@@ -276,7 +293,11 @@ export function DependencyExplorer({
     void runInspect(openRequest.packageName, nextContext.packageJson)
   }, [openRequest])
 
-  async function runInspect(nextQuery: string, context: PackageJson = sessionContext.packageJson) {
+  async function runInspect(
+    nextQuery: string,
+    context: PackageJson = sessionContext.packageJson,
+    options: InspectOptions = {},
+  ) {
     if (!nextQuery) {
       setStatus('error')
       setErrorMsg('Enter a package name to inspect.')
@@ -285,22 +306,38 @@ export function DependencyExplorer({
       return
     }
 
-    setStatus('loading')
+    if (!options.silent) {
+      setStatus('loading')
+    }
     setErrorMsg('')
 
     try {
       const nextReport = await inspectDependencyPackage(nextQuery, context)
       setReport(nextReport)
-      setSelectedMajors(getInitialSelectedMajors(nextReport))
-      setShowRequiredPeerColumns(true)
-      setShowOptionalColumns(includeOptionalPeerDeps)
-      setShowPlatformDependencies(true)
+
+      if (options.preserveFilters) {
+        setSelectedMajors(current => {
+          const nextSelectedMajors = nextReport.majorSeries.filter(series => current.includes(series))
+          return nextSelectedMajors.length > 0
+            ? nextSelectedMajors
+            : getInitialSelectedMajors(nextReport)
+        })
+      } else {
+        setSelectedMajors(getInitialSelectedMajors(nextReport))
+        setShowRequiredPeerColumns(true)
+        setShowOptionalColumns(includeOptionalPeerDeps)
+        setShowPlatformDependencies(true)
+      }
+
       setStatus('done')
     } catch (error) {
       setStatus('error')
       setErrorMsg(error instanceof Error ? error.message : String(error))
-      setReport(null)
-      setSelectedMajors([])
+
+      if (!options.silent) {
+        setReport(null)
+        setSelectedMajors([])
+      }
     }
   }
 
@@ -393,16 +430,23 @@ export function DependencyExplorer({
       return
     }
 
+    const remove = Boolean(
+      report.currentResolvedVersion
+      && row.visibleVersions.includes(report.currentResolvedVersion),
+    )
     const freeze = row.targetVersion !== report.latestVersion
     setApplyPendingVersion(row.key)
 
     try {
-      const nextPackage = await onApplyVersion(report.packageName, row.targetVersion, freeze)
+      const nextPackage = await onApplyVersion(report.packageName, row.targetVersion, freeze, remove)
       setSessionContext(current => ({
         ...current,
         packageJson: nextPackage,
       }))
-      await runInspect(report.packageName, nextPackage)
+      await runInspect(report.packageName, nextPackage, {
+        preserveFilters: true,
+        silent: true,
+      })
     } finally {
       setApplyPendingVersion(null)
     }
@@ -480,7 +524,7 @@ export function DependencyExplorer({
               </button>
             </form>
 
-            {status === 'idle' ? (
+            {status === 'idle' && !report ? (
               <p className="dependency-explorer__empty">
                 Search for a package to compare grouped version ranges, engines, and direct dependencies.
               </p>
@@ -490,7 +534,7 @@ export function DependencyExplorer({
               <div className="dependency-explorer__error">{errorMsg}</div>
             ) : null}
 
-            {status === 'done' && report ? (
+            {report ? (
               <div className="dependency-explorer__results">
                 <div className="dependency-explorer__summary">
                   <h4>{report.packageName}</h4>
@@ -515,7 +559,7 @@ export function DependencyExplorer({
                           <button
                             key={major}
                             type="button"
-                            className={`dependency-explorer__segment dependency-explorer__segment--major${selectedMajors.includes(major) ? ' dependency-explorer__segment--active' : ''}`}
+                            className={`dependency-explorer__segment dependency-explorer__segment--major${selectedMajors.includes(major) ? ' dependency-explorer__segment--active' : ''}${selectedMajors.includes(major) && major !== latestMajor ? ' dependency-explorer__segment--major-older' : ''}`}
                             onClick={() => handleToggleMajor(major)}
                             aria-pressed={selectedMajors.includes(major)}
                           >
@@ -588,7 +632,7 @@ export function DependencyExplorer({
                 </div>
 
                 <div className="dependency-explorer__table-wrap">
-                  <table className="dependency-explorer__table">
+                  <table className={`dependency-explorer__table${!hasDetailColumns ? ' dependency-explorer__table--compact' : ''}`}>
                     <thead>
                       <tr>
                         <th scope="col">Version</th>
@@ -616,14 +660,17 @@ export function DependencyExplorer({
                     <tbody>
                       {visibleRows.map(row => {
                         const freeze = Boolean(report.latestVersion && row.targetVersion !== report.latestVersion)
+                        const hasSelectedVersion = Boolean(report.currentResolvedVersion)
+                        const isMissingFromInput = !report.currentVersion
                         const isCurrentResolvedRow = Boolean(
                           report.currentResolvedVersion
                           && row.visibleVersions.includes(report.currentResolvedVersion),
                         )
-                        const buttonDisabled = !sessionContext.canApply || applyPendingVersion !== null
-                        const buttonLabel = applyPendingVersion === row.key
-                          ? 'Applying…'
-                          : row.visibleVersionLabel
+                        const isInactiveRow = hasSelectedVersion && !isCurrentResolvedRow
+                        const buttonDisabled =
+                          !sessionContext.canApply
+                          || applyPendingVersion !== null
+                          || status === 'loading'
                         const buttonTitle = !sessionContext.canApply && sessionContext.applyDisabledReason
                           ? sessionContext.applyDisabledReason
                           : createButtonTitle(
@@ -632,6 +679,7 @@ export function DependencyExplorer({
                             row.targetVersion,
                             report.latestVersion,
                             freeze,
+                            isCurrentResolvedRow,
                           )
 
                         return (
@@ -639,12 +687,12 @@ export function DependencyExplorer({
                             <td className="dependency-explorer__version-cell">
                               <button
                                 type="button"
-                                className={`dependency-explorer__version-button${!isCurrentResolvedRow ? ' dependency-explorer__version-button--new' : ''}${freeze ? ' dependency-explorer__version-button--override' : ''}`}
+                                className={`dependency-explorer__version-button${isCurrentResolvedRow ? ' dependency-explorer__version-button--current' : ' dependency-explorer__version-button--new'}${freeze ? ' dependency-explorer__version-button--override' : ''}${isMissingFromInput ? ' dependency-explorer__version-button--missing' : ''}${isInactiveRow ? ' dependency-explorer__version-button--inactive' : ''}`}
                                 disabled={buttonDisabled}
                                 title={buttonTitle}
                                 onClick={() => void handleApplyRow(row)}
                               >
-                                {buttonLabel}
+                                {row.visibleVersionLabel}
                               </button>
                             </td>
                             {showEngineNodeColumn ? (

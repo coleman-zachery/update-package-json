@@ -1,4 +1,5 @@
 import semver from 'semver'
+import { throwIfAborted } from '@/lib/resolver/abort'
 import { isStable, newestStable } from '@/lib/semver-utils'
 
 export interface VersionManifest {
@@ -58,12 +59,14 @@ function saveToCache(pkg: string, data: Packument) {
   }
 }
 
-export async function fetchPackument(pkg: string): Promise<Packument> {
+export async function fetchPackument(pkg: string, signal?: AbortSignal): Promise<Packument> {
+  throwIfAborted(signal)
   const cached = getFromCache(pkg)
   if (cached) return cached
 
   const res = await fetch(`${REGISTRY}/${encodeURIComponent(pkg)}`, {
     headers: { Accept: 'application/vnd.npm.install-v1+json' },
+    signal,
   })
 
   if (!res.ok) {
@@ -104,7 +107,8 @@ interface NodeVersionsCache {
 
 const NODE_VERSIONS_CACHE_KEY = 'node-release-versions'
 
-export async function fetchNodeVersions(): Promise<string[]> {
+export async function fetchNodeVersions(signal?: AbortSignal): Promise<string[]> {
+  throwIfAborted(signal)
   try {
     const raw = localStorage.getItem(NODE_VERSIONS_CACHE_KEY)
     if (raw) {
@@ -113,7 +117,7 @@ export async function fetchNodeVersions(): Promise<string[]> {
     }
   } catch { /* ignore */ }
 
-  const res = await fetch('https://nodejs.org/dist/index.json')
+  const res = await fetch('https://nodejs.org/dist/index.json', { signal })
   if (!res.ok) throw new Error(`Failed to fetch Node.js versions: ${res.status}`)
   const data = await res.json() as Array<{ version: string }>
 
@@ -129,14 +133,14 @@ export async function fetchNodeVersions(): Promise<string[]> {
   return versions
 }
 
-export async function fetchLatestNodeVersion(): Promise<string> {
-  const latest = newestStable(await fetchNodeVersions())
+export async function fetchLatestNodeVersion(signal?: AbortSignal): Promise<string> {
+  const latest = newestStable(await fetchNodeVersions(signal))
   if (!latest) throw new Error('Unable to determine the latest Node.js version')
   return latest
 }
 
-export async function fetchLatestNpmVersion(): Promise<string> {
-  const npmPackument = await fetchPackument('npm')
+export async function fetchLatestNpmVersion(signal?: AbortSignal): Promise<string> {
+  const npmPackument = await fetchPackument('npm', signal)
   const latest = getPreferredStableVersions(npmPackument)[0] || newestStable(getAllVersions(npmPackument))
   if (!latest) throw new Error('Unable to determine the latest npm version')
   return latest

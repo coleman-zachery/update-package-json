@@ -269,6 +269,10 @@
   color: var(--text-primary);
 }
 
+.dependency-explorer__segment--required.dependency-explorer__segment--active:hover {
+  background: rgba(98, 58, 184, 0.98);
+}
+
 .dependency-explorer__segment--optional.dependency-explorer__segment--active {
   background: rgba(113, 67, 12, 0.95);
   color: #fff2d6;
@@ -283,6 +287,19 @@
 .dependency-explorer__segment--major.dependency-explorer__segment--active {
   background: rgba(83, 49, 156, 0.92);
   color: var(--text-primary);
+}
+
+.dependency-explorer__segment--major.dependency-explorer__segment--active:hover {
+  background: rgba(98, 58, 184, 0.98);
+}
+
+.dependency-explorer__segment--major.dependency-explorer__segment--major-older.dependency-explorer__segment--active {
+  background: rgba(113, 67, 12, 0.95);
+  color: #fff2d6;
+}
+
+.dependency-explorer__segment--major.dependency-explorer__segment--major-older.dependency-explorer__segment--active:hover {
+  background: rgba(143, 82, 10, 0.98);
 }
 
 .dependency-explorer__filter-toggle,
@@ -309,6 +326,11 @@
   border-color: var(--border-accent);
   background: rgba(83, 49, 156, 0.92);
   color: var(--text-primary);
+}
+
+.dependency-explorer__filter-toggle--active:hover,
+.dependency-explorer__filter-badge--active:hover {
+  background: rgba(98, 58, 184, 0.98);
 }
 
 .dependency-explorer__filter-badge--optional.dependency-explorer__filter-badge--active {
@@ -395,6 +417,11 @@
   border-spacing: 0;
 }
 
+.dependency-explorer__table--compact {
+  width: auto;
+  min-width: 0;
+}
+
 .dependency-explorer__table thead th {
   position: sticky;
   top: 0;
@@ -472,7 +499,12 @@
   font-weight: 700;
   text-align: left;
   cursor: pointer;
-  transition: transform 0.15s, background 0.15s, border-color 0.15s, opacity 0.15s;
+  transition: transform 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.dependency-explorer__version-button--current {
+  background: rgba(76, 42, 145, 0.98);
+  color: #f4efff;
 }
 
 .dependency-explorer__version-button--new {
@@ -481,17 +513,39 @@
   color: #d9d1ea;
 }
 
+.dependency-explorer__version-button--missing {
+  background: rgba(18, 20, 27, 0.72);
+  color: #ebe7f2;
+}
+
+.dependency-explorer__version-button--inactive {
+  background: rgba(18, 20, 27, 0.72);
+  color: #ebe7f2;
+}
+
 .dependency-explorer__version-button:hover:not(:disabled) {
   transform: translateY(-1px);
   background: rgba(67, 36, 127, 0.96);
+}
+
+.dependency-explorer__version-button--current:hover:not(:disabled) {
+  background: rgba(98, 58, 184, 0.98);
 }
 
 .dependency-explorer__version-button--new:hover:not(:disabled) {
   background: rgba(67, 36, 127, 0.62);
 }
 
+.dependency-explorer__version-button--missing:hover:not(:disabled) {
+  background: rgba(67, 36, 127, 0.62);
+}
+
+.dependency-explorer__version-button--inactive:hover:not(:disabled) {
+  background: rgba(67, 36, 127, 0.62);
+}
+
 .dependency-explorer__version-button:disabled {
-  opacity: 0.45;
+  opacity: 1;
   cursor: not-allowed;
 }
 
@@ -506,12 +560,39 @@
   color: #f0deba;
 }
 
-.dependency-explorer__version-button--override:hover:not(:disabled) {
+.dependency-explorer__version-button--current.dependency-explorer__version-button--override {
   background: rgba(143, 82, 10, 0.98);
+  color: #fff2d6;
+}
+
+.dependency-explorer__version-button--current.dependency-explorer__version-button--override:hover:not(:disabled) {
+  background: rgba(165, 95, 12, 0.98);
+}
+
+.dependency-explorer__version-button--missing.dependency-explorer__version-button--override {
+  background: rgba(18, 20, 27, 0.72);
+  color: #f3e6cd;
+}
+
+.dependency-explorer__version-button--inactive.dependency-explorer__version-button--override {
+  background: rgba(18, 20, 27, 0.72);
+  color: #f3e6cd;
+}
+
+.dependency-explorer__version-button--override:hover:not(:disabled) {
+  background: rgba(165, 95, 12, 0.98);
 }
 
 .dependency-explorer__version-button--new.dependency-explorer__version-button--override:hover:not(:disabled) {
-  background: rgba(143, 82, 10, 0.62);
+  background: rgba(165, 95, 12, 0.68);
+}
+
+.dependency-explorer__version-button--missing.dependency-explorer__version-button--override:hover:not(:disabled) {
+  background: rgba(165, 95, 12, 0.68);
+}
+
+.dependency-explorer__version-button--inactive.dependency-explorer__version-button--override:hover:not(:disabled) {
+  background: rgba(165, 95, 12, 0.68);
 }
 
 .dependency-explorer__column-link {
@@ -546,7 +627,7 @@
 .dependency-explorer__column-link--peer:hover {
   color: #ffffff;
   border-color: rgba(124, 99, 255, 0.7);
-  background: var(--accent);
+  background: rgba(98, 58, 184, 0.98);
 }
 
 .dependency-explorer__column-link--optional {

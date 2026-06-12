@@ -26,7 +26,9 @@ import {
   createMarkerExtension,
   createOverrideDependencyHighlightExtension,
   createPackageJsonSyncExtension,
+  createPlatformDependencyHighlightExtension,
   createStaleDependencyHighlightExtension,
+  createTransitiveDependencyHighlightExtension,
   type TextareaMarker,
 } from '@/components/WhitespaceTextarea/extensions'
 import './index.css'
@@ -46,6 +48,8 @@ interface Props {
   onInspectDependency?: (packageName: string) => void
   highlightMajorBuildVersions?: boolean
   overriddenDependencyNames?: string[]
+  platformDependencyNames?: string[]
+  transitiveDependencyNames?: string[]
 }
 
 const packageJsonHighlightStyle = HighlightStyle.define([
@@ -66,6 +70,8 @@ export function WhitespaceTextarea({
   onInspectDependency,
   highlightMajorBuildVersions = false,
   overriddenDependencyNames = [],
+  platformDependencyNames = [],
+  transitiveDependencyNames = [],
 }: Props) {
   const indentStyle = useMemo(
     () => getEffectiveIndentStyle(value, spaceIndentSize),
@@ -107,6 +113,14 @@ export function WhitespaceTextarea({
       configuredExtensions.push(createOverrideDependencyHighlightExtension(overriddenDependencyNames))
     }
 
+    if (readOnly && platformDependencyNames.length > 0) {
+      configuredExtensions.push(createPlatformDependencyHighlightExtension(platformDependencyNames))
+    }
+
+    if (readOnly && transitiveDependencyNames.length > 0) {
+      configuredExtensions.push(createTransitiveDependencyHighlightExtension(transitiveDependencyNames))
+    }
+
     if (!readOnly && markers.length > 0) {
       configuredExtensions.push(createMarkerExtension(markers))
     }
@@ -116,7 +130,7 @@ export function WhitespaceTextarea({
     }
 
     return configuredExtensions
-  }, [ariaLabel, highlightMajorBuildVersions, indentStyle.size, markers, onInspectDependency, overriddenDependencyNames, readOnly, spaceIndentSize, staleDependencyNames])
+  }, [ariaLabel, highlightMajorBuildVersions, indentStyle.size, markers, onInspectDependency, overriddenDependencyNames, platformDependencyNames, readOnly, spaceIndentSize, staleDependencyNames, transitiveDependencyNames])
 
   useLayoutEffect(() => {
     const view = editorViewRef.current

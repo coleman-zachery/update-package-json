@@ -8,6 +8,11 @@ import type { EngineName, ResolveOptions } from '@/lib/resolver'
 import type { PlatformSelection } from '@/lib/resolver'
 import './index.css'
 
+const PLATFORM_THEME_COLOR = 'rgb(51, 187, 255)'
+const PLATFORM_THEME_COLOR_SOFT = 'rgba(51, 187, 255, 0.72)'
+const PLATFORM_SELECTED_TEXT_COLOR = 'rgb(242, 240, 247)'
+const PLATFORM_SELECTED_HINT_COLOR = 'rgb(160, 143, 121)'
+
 export interface EngineControlButton {
   engineName: EngineName
   label: string
@@ -58,14 +63,31 @@ const platformLabelTextClassName = css({
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
+  color: PLATFORM_THEME_COLOR,
+})
+
+const platformLabelTextSelectedClassName = css({
+  color: PLATFORM_SELECTED_TEXT_COLOR,
+})
+
+const platformLabelTextMenuClassName = css({
+  color: PLATFORM_SELECTED_TEXT_COLOR,
 })
 
 const platformHintClassName = css({
   flexShrink: 0,
-  color: 'var(--text-muted)',
+  color: PLATFORM_THEME_COLOR_SOFT,
   fontSize: '0.72rem',
   letterSpacing: '0.03em',
   whiteSpace: 'nowrap',
+})
+
+const platformHintSelectedClassName = css({
+  color: PLATFORM_SELECTED_HINT_COLOR,
+})
+
+const platformHintMenuClassName = css({
+  color: PLATFORM_SELECTED_HINT_COLOR,
 })
 
 const platformUnavailableClassName = css({
@@ -77,7 +99,7 @@ const platformSelectSx = {
   width: '100%',
   backgroundColor: 'color-mix(in srgb, var(--accent) 6%, transparent)',
   borderRadius: '10px',
-  color: 'var(--text-primary)',
+  color: PLATFORM_THEME_COLOR,
   '& .MuiOutlinedInput-notchedOutline': {
     borderColor: '#6f647f',
   },
@@ -98,23 +120,33 @@ const platformSelectSx = {
     lineHeight: 1.35,
   },
   '& .MuiSvgIcon-root': {
-    color: '#cec8d7',
+    color: PLATFORM_SELECTED_HINT_COLOR,
   },
   '&.Mui-disabled': {
     opacity: 0.55,
   },
 } as const
 
-function renderPlatformOption(option?: { label: string; hint?: string }) {
+function renderPlatformOption(
+  option?: { label: string; hint?: string },
+  variant: 'menu' | 'selected' = 'menu',
+) {
   if (!option) {
     return null
   }
 
+  const labelClassName = variant === 'selected'
+    ? `${platformLabelTextClassName} ${platformLabelTextSelectedClassName}`
+    : `${platformLabelTextClassName} ${platformLabelTextMenuClassName}`
+  const hintClassName = variant === 'selected'
+    ? `${platformHintClassName} ${platformHintSelectedClassName}`
+    : `${platformHintClassName} ${platformHintMenuClassName}`
+
   return (
     <span className={platformValueClassName}>
-      <span className={platformLabelTextClassName}>{option.label}</span>
+      <span className={labelClassName}>{option.label}</span>
       {option.hint ? (
-        <span className={platformHintClassName}>{option.hint}</span>
+        <span className={hintClassName}>{option.hint}</span>
       ) : null}
     </span>
   )
@@ -129,6 +161,12 @@ export function OptionsBar({
   onOptionClick,
 }: Props) {
   const [openPlatformMenu, setOpenPlatformMenu] = useState<keyof PlatformSelection | null>(null)
+
+  useEffect(() => {
+    if (platformSelectors?.disabled) {
+      setOpenPlatformMenu(null)
+    }
+  }, [platformSelectors?.disabled])
 
   useEffect(() => {
     if (!openPlatformMenu) {
@@ -220,7 +258,7 @@ export function OptionsBar({
                   border: '1px solid #6f647f',
                   borderRadius: '10px',
                   backgroundColor: '#1f212d',
-                  color: 'var(--text-primary)',
+                  color: PLATFORM_THEME_COLOR,
                   boxShadow: '0 18px 42px rgba(0, 0, 0, 0.38)',
                 },
               },
@@ -232,12 +270,12 @@ export function OptionsBar({
               return <span className={platformUnavailableClassName}>N/A</span>
             }
 
-            return renderPlatformOption(selectedOption) ?? value
+            return renderPlatformOption(selectedOption, 'selected') ?? value
           }}
         >
           {options.map(option => (
             <MenuItem key={option.value} value={option.value}>
-              {renderPlatformOption(option)}
+              {renderPlatformOption(option, 'menu')}
             </MenuItem>
           ))}
         </Select>

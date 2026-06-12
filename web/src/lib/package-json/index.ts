@@ -1,4 +1,4 @@
-export { applyMajorBuildRanges, upsertDependencyValue } from './dependency-updates'
+export { applyMajorBuildRanges, removeDependenciesFromPackage, removeDependencyValue, upsertDependencyValue } from './dependency-updates'
 export { getTextReplacement, syncPackageJsonAfterInputChange } from './editor'
 export {
   reformatPackageJson,

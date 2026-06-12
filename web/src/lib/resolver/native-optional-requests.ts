@@ -34,14 +34,20 @@ function collectExplicitPlatformSuffixes(pkg: PackageJson): Set<string> {
 async function collectNativeOptionalDependencyEntries(
   ctx: ResolutionContext,
 ): Promise<Array<{
+  rootDependencyName: string
+  rootDependencyVersion: string
   dependencyName: string
+  dependencyVersion: string
   optionalName: string
   optionalRange: string
   section: DependencySection
     suffix: string
   }>> {
   const entries: Array<{
+    rootDependencyName: string
+    rootDependencyVersion: string
     dependencyName: string
+    dependencyVersion: string
     optionalName: string
     optionalRange: string
     section: DependencySection
@@ -49,7 +55,10 @@ async function collectNativeOptionalDependencyEntries(
   }> = []
 
   function addOptionalEntries(
+    rootDependencyName: string,
+    rootDependencyVersion: string,
     dependencyName: string,
+    dependencyVersion: string,
     section: DependencySection,
     optionalDependencies: Record<string, string> | undefined,
   ) {
@@ -57,19 +66,44 @@ async function collectNativeOptionalDependencyEntries(
     for (const [optionalName, optionalRange] of Object.entries(optionalDependencies)) {
       const suffix = extractPlatformSuffix(optionalName)
       if (!suffix) continue
-      entries.push({ dependencyName, optionalName, optionalRange, section, suffix })
+      entries.push({
+        rootDependencyName,
+        rootDependencyVersion,
+        dependencyName,
+        dependencyVersion,
+        optionalName,
+        optionalRange,
+        section,
+        suffix,
+      })
     }
   }
 
   for (const state of ctx.states.values()) {
+    ctx.throwIfAborted()
     if (!state.root) continue
-    addOptionalEntries(state.name, state.section, state.manifest.optionalDependencies)
+    addOptionalEntries(
+      state.name,
+      state.currentVersion,
+      state.name,
+      state.currentVersion,
+      state.section,
+      state.manifest.optionalDependencies,
+    )
     for (const [dependencyName, dependencyRange] of Object.entries(state.manifest.dependencies ?? {})) {
+      ctx.throwIfAborted()
       const analysis = await ctx.getInstallTargetAnalysis(dependencyName, dependencyRange)
       const installedVersion = analysis.latestEngineCompatibleVersion ?? analysis.latestSatisfyingVersion
       if (!installedVersion) continue
       const dependencyManifest = (await ctx.getPackumentCached(dependencyName)).versions[installedVersion]
-      addOptionalEntries(dependencyName, state.section, dependencyManifest?.optionalDependencies)
+      addOptionalEntries(
+        state.name,
+        state.currentVersion,
+        dependencyName,
+        installedVersion,
+        state.section,
+        dependencyManifest?.optionalDependencies,
+      )
     }
   }
   return entries
@@ -92,6 +126,7 @@ export async function collectNativeOptionalRootRequests(
   const entries = await collectNativeOptionalDependencyEntries(ctx)
 
   for (const entry of entries) {
+    ctx.throwIfAborted()
     availableTargets.add(entry.suffix)
     const family = familyMap.get(entry.dependencyName) ?? {
       optionalDependencyNames: new Set<string>(),
@@ -108,6 +143,7 @@ export async function collectNativeOptionalRootRequests(
   const allIssues: PlatformOptionalFamily['issues'] = []
 
   for (const family of familyMap.values()) {
+    ctx.throwIfAborted()
     const familyTargets = Array.from(family.availableTargets).sort((left, right) => left.localeCompare(right))
     const inferredResolution = reconcilePlatformTargetsDetailed(
       Array.from(inferredTargets),
@@ -138,6 +174,7 @@ export async function collectNativeOptionalRootRequests(
   const activeTargets = new Set<string>(selectedTargets)
 
   for (const entry of entries) {
+    ctx.throwIfAborted()
     if (
       !activeTargets.has(entry.suffix)
       || hasRootPackage(pkg, entry.optionalName)
@@ -151,6 +188,9 @@ export async function collectNativeOptionalRootRequests(
       name: entry.optionalName,
       section: entry.section,
       sourceName: entry.dependencyName,
+      sourceVersion: entry.dependencyVersion,
+      rootSourceName: entry.rootDependencyName,
+      rootSourceVersion: entry.rootDependencyVersion,
       currentValue: entry.optionalRange,
       requestedRange: entry.optionalRange,
     })

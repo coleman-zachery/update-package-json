@@ -1,5 +1,7 @@
 .options-bar {
   --options-bar-platform-field-width: 176px;
+  --options-bar-platform-accent: rgb(51, 187, 255);
+  --options-bar-platform-accent-soft: rgba(51, 187, 255, 0.72);
   display: flex;
   align-items: center;
   gap: 24px;
@@ -44,7 +46,7 @@
 }
 
 .options-bar__platform-label {
-  color: #cec8d7;
+  color: var(--options-bar-platform-accent);
   font-size: 0.76rem;
   font-weight: 600;
   text-transform: uppercase;

@@ -16,6 +16,7 @@ import type {
   ResolveOptions,
   ResolveResult,
 } from '@/lib/resolver'
+import { isAbortError } from '@/lib/resolver/abort'
 import {
   coercePlatformSelection,
   DEFAULT_PLATFORM_SELECTION,
@@ -30,6 +31,8 @@ import {
   hasDependencyOverride,
   parsePackageJson,
   reformatPackageJson,
+  removeDependenciesFromPackage,
+  removeDependencyValue,
   serializePackageJson,
   setDependencyFrozen,
   upsertDependencyValue,
@@ -59,7 +62,6 @@ import './index.css'
 type PendingAction = 'update' | 'apply-fixes'
 const MAX_APPLY_FIXES_PASSES = 8
 const PLATFORM_SELECTION_STORAGE_KEY = 'upj-platform-selection'
-const PLATFORM_SELECTION_RESOLVE_DEBOUNCE_MS = 220
 
 function readStoredPlatformSelection(): PlatformSelection {
   try {
@@ -107,6 +109,7 @@ export default function App() {
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
   const [forcedOverrideNames, setForcedOverrideNames] = useState<string[]>([])
   const [majorBuildsActive, setMajorBuildsActive] = useState(true)
+  const [transitivesActive, setTransitivesActive] = useState(true)
   const [platformSelection, setPlatformSelection] = useState<PlatformSelection>(() => readStoredPlatformSelection())
   const [platformAvailableTargets, setPlatformAvailableTargets] = useState<string[]>([])
   const [dependencyExplorerRequest, setDependencyExplorerRequest] = useState<{
@@ -119,7 +122,7 @@ export default function App() {
   } | null>(null)
   const pendingIndentAutoDetectRef = useRef(false)
   const dependencyExplorerRequestIdRef = useRef(0)
-  const platformSelectionResolveTimeoutRef = useRef<number | null>(null)
+  const resolveAbortControllerRef = useRef<AbortController | null>(null)
 
   const latestVersions = useLatestVersions()
   const inputValidation = useInputValidation(input)
@@ -140,6 +143,20 @@ export default function App() {
     }
   }, [input])
 
+  const transitiveDependencyNames = useMemo(() => {
+    if (!result) {
+      return []
+    }
+
+    return [
+      ...new Set(
+        result.changeSources
+          .filter(source => source.kind === 'companion')
+          .map(source => source.name),
+      ),
+    ]
+  }, [result])
+
   const outputPackage = useMemo(() => {
     if (!result) {
       return null
@@ -151,10 +168,14 @@ export default function App() {
     const overriddenDependencyNames = new Set(Object.keys(getStringOverrides(packageWithForcedOverrides)))
     const majorBuildCandidateNames = result.latestDependencyNames.filter(name => !overriddenDependencyNames.has(name))
 
-    return majorBuildsActive
+    const packageWithMajorBuilds = majorBuildsActive
       ? applyMajorBuildRanges(packageWithForcedOverrides, majorBuildCandidateNames)
       : packageWithForcedOverrides
-  }, [forcedOverrideNames, majorBuildsActive, result])
+
+    return transitivesActive
+      ? packageWithMajorBuilds
+      : removeDependenciesFromPackage(packageWithMajorBuilds, transitiveDependencyNames)
+  }, [forcedOverrideNames, majorBuildsActive, result, transitiveDependencyNames, transitivesActive])
 
   const outputJson = useMemo(() => {
     if (!outputPackage) {
@@ -196,9 +217,7 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (platformSelectionResolveTimeoutRef.current !== null) {
-        window.clearTimeout(platformSelectionResolveTimeoutRef.current)
-      }
+      resolveAbortControllerRef.current?.abort()
     }
   }, [])
 
@@ -208,11 +227,9 @@ export default function App() {
     action: PendingAction,
     nextPlatformSelection: PlatformSelection = platformSelection,
   ) {
-    if (platformSelectionResolveTimeoutRef.current !== null) {
-      window.clearTimeout(platformSelectionResolveTimeoutRef.current)
-      platformSelectionResolveTimeoutRef.current = null
-    }
-
+    resolveAbortControllerRef.current?.abort()
+    const abortController = new AbortController()
+    resolveAbortControllerRef.current = abortController
     setPendingAction(action)
     setForcedOverrideNames([])
     setStatus('loading')
@@ -225,17 +242,30 @@ export default function App() {
       const nextResult = await resolvePackageJson(nextInput, options, nextRestrictions, {
         platformSelection: nextPlatformSelection,
         onProgress: setResolveProgress,
+        signal: abortController.signal,
       })
+      if (abortController.signal.aborted) {
+        return
+      }
       setPlatformAvailableTargets(nextResult.platformSupport.availableTargets)
       setForcedOverrideNames(getPendingForcedOverrideNames(nextResult))
       setMajorBuildsActive(true)
+      setTransitivesActive(true)
       setResult(nextResult)
       setStatus('done')
     } catch (error) {
+      if (isAbortError(error)) {
+        setStatus('idle')
+        setResolveProgress(null)
+        return
+      }
       setErrorMsg(error instanceof Error ? error.message : String(error))
       setStatus('error')
     } finally {
-      setPendingAction(null)
+      if (resolveAbortControllerRef.current === abortController) {
+        resolveAbortControllerRef.current = null
+      }
+      setPendingAction(current => current === action ? null : current)
     }
   }
 
@@ -248,6 +278,9 @@ export default function App() {
       return
     }
 
+    resolveAbortControllerRef.current?.abort()
+    const abortController = new AbortController()
+    resolveAbortControllerRef.current = abortController
     setPendingAction('apply-fixes')
     setForcedOverrideNames([])
     setStatus('loading')
@@ -290,22 +323,42 @@ export default function App() {
         workingResult = await resolvePackageJson(workingInput, options, workingRestrictions, {
           platformSelection,
           onProgress: setResolveProgress,
+          signal: abortController.signal,
         })
+        if (abortController.signal.aborted) {
+          return
+        }
       }
 
+      if (abortController.signal.aborted) {
+        return
+      }
       setInput(workingInput)
       setRestrictions(workingRestrictions)
       setPlatformAvailableTargets(workingResult.platformSupport.availableTargets)
       setForcedOverrideNames(getPendingForcedOverrideNames(workingResult))
       setMajorBuildsActive(true)
+      setTransitivesActive(true)
       setResult(workingResult)
       setStatus('done')
     } catch (error) {
+      if (isAbortError(error)) {
+        setStatus('idle')
+        setResolveProgress(null)
+        return
+      }
       setErrorMsg(error instanceof Error ? error.message : String(error))
       setStatus('error')
     } finally {
-      setPendingAction(null)
+      if (resolveAbortControllerRef.current === abortController) {
+        resolveAbortControllerRef.current = null
+      }
+      setPendingAction(current => current === 'apply-fixes' ? null : current)
     }
+  }
+
+  function handleStopResolve() {
+    resolveAbortControllerRef.current?.abort()
   }
 
   function handleUseOutputAsInput(nextInput: string) {
@@ -461,29 +514,36 @@ export default function App() {
     packageName: string,
     versionSpec: string,
     freeze: boolean,
+    remove = false,
   ): Promise<ReturnType<typeof parsePackageJson>> {
-    const inputPackage = input.trim() ? parsePackageJson(input) : {}
-    const preferredSection =
-      inputPackage.dependencies?.[packageName] ? 'dependencies'
-        : inputPackage.devDependencies?.[packageName] ? 'devDependencies'
-          : inputPackage.peerDependencies?.[packageName] ? 'peerDependencies'
-            : inputPackage.optionalDependencies?.[packageName] ? 'optionalDependencies'
-              : 'dependencies'
+    let nextInput = input
 
-    const withDependency = upsertDependencyValue(
-      input,
-      packageName,
-      versionSpec,
-      spaceIndentSize,
-      preferredSection,
-    )
-    const nextInput = setDependencyFrozen(
-      withDependency,
-      packageName,
-      freeze,
-      spaceIndentSize,
-      preferredSection,
-    )
+    if (remove) {
+      nextInput = removeDependencyValue(input, packageName, spaceIndentSize)
+    } else {
+      const inputPackage = input.trim() ? parsePackageJson(input) : {}
+      const preferredSection =
+        inputPackage.dependencies?.[packageName] ? 'dependencies'
+          : inputPackage.devDependencies?.[packageName] ? 'devDependencies'
+            : inputPackage.peerDependencies?.[packageName] ? 'peerDependencies'
+              : inputPackage.optionalDependencies?.[packageName] ? 'optionalDependencies'
+                : 'dependencies'
+
+      const withDependency = upsertDependencyValue(
+        input,
+        packageName,
+        versionSpec,
+        spaceIndentSize,
+        preferredSection,
+      )
+      nextInput = setDependencyFrozen(
+        withDependency,
+        packageName,
+        freeze,
+        spaceIndentSize,
+        preferredSection,
+      )
+    }
 
     const nextRestrictions = syncRestrictions(
       restrictions,
@@ -526,6 +586,10 @@ export default function App() {
     setMajorBuildsActive(current => !current)
   }
 
+  function handleTransitivesToggle() {
+    setTransitivesActive(current => !current)
+  }
+
   const platformSelectorState = useMemo(
     () => getPlatformSelectorState(platformAvailableTargets, platformSelection),
     [platformAvailableTargets, platformSelection],
@@ -555,19 +619,6 @@ export default function App() {
     }))
     setPlatformSelection(nextSelection)
     writeStoredPlatformSelection(nextSelection)
-
-    if (!input.trim()) {
-      return
-    }
-
-    if (platformSelectionResolveTimeoutRef.current !== null) {
-      window.clearTimeout(platformSelectionResolveTimeoutRef.current)
-    }
-
-    platformSelectionResolveTimeoutRef.current = window.setTimeout(() => {
-      platformSelectionResolveTimeoutRef.current = null
-      void runUpdatePackage(input, restrictions, 'update', nextSelection)
-    }, PLATFORM_SELECTION_RESOLVE_DEBOUNCE_MS)
   }
 
   function handleInspectDependency(packageName: string, source: 'input' | 'output') {
@@ -823,24 +874,28 @@ export default function App() {
             result={result}
             status={status}
             progress={resolveProgress}
+            onStopResolve={handleStopResolve}
             onApplyFixes={() => void handleApplyFixes()}
             applyFixesDisabled={status === 'loading' || pendingEngine !== null}
             applyFixesLabel={status === 'loading' && pendingAction === 'apply-fixes' ? 'Applying…' : 'Apply Fixes'}
           />
         </div>
         <div className="app__column">
-          <OutputPane
-            result={result}
-            outputJson={outputJson}
-            onForceOverrides={handleForceOverrides}
-            onToggleMajorBuilds={handleMajorBuildsToggle}
-            onUseAsInput={handleUseOutputAsInput}
-            onInspectDependency={packageName => handleInspectDependency(packageName, 'output')}
-            forcedOverrideNames={forcedOverrideNames}
-            majorBuildsActive={majorBuildsActive}
-            spaceIndentSize={spaceIndentSize}
-            status={status}
-          />
+        <OutputPane
+          result={result}
+          outputJson={outputJson}
+          onForceOverrides={handleForceOverrides}
+          onToggleMajorBuilds={handleMajorBuildsToggle}
+          onToggleTransitives={handleTransitivesToggle}
+          onUseAsInput={handleUseOutputAsInput}
+          onInspectDependency={packageName => handleInspectDependency(packageName, 'output')}
+          forcedOverrideNames={forcedOverrideNames}
+          majorBuildsActive={majorBuildsActive}
+          transitiveDependencyNames={transitiveDependencyNames}
+          transitivesActive={transitivesActive}
+          spaceIndentSize={spaceIndentSize}
+          status={status}
+        />
         </div>
       </main>
     </div>

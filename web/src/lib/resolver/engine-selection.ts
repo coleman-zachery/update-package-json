@@ -2,6 +2,7 @@ import semver from 'semver'
 import { fetchNodeVersions, fetchPackument, getAllVersions } from '@/lib/npm'
 import { filterStable } from '@/lib/semver-utils'
 import { getPreferredResolvedVersion } from './state-helpers'
+import { throwIfAborted } from './abort'
 import type { EngineName, ResolvedManifest } from './types'
 
 export async function pickCompatibleEngineVersion(
@@ -12,14 +13,16 @@ export async function pickCompatibleEngineVersion(
   restricted: boolean,
   addMissingEngine: boolean,
   avoidLatestVersions: boolean,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
+  throwIfAborted(signal)
   if (!declaredValue && !addMissingEngine && !respectEngine) {
     return undefined
   }
 
   let versions = engineName === 'node'
-    ? await fetchNodeVersions()
-    : filterStable(getAllVersions(await fetchPackument('npm')))
+    ? await fetchNodeVersions(signal)
+    : filterStable(getAllVersions(await fetchPackument('npm', signal)))
   const declaredRange = declaredValue && semver.validRange(declaredValue)
 
   if (declaredRange && (respectEngine || restricted)) {

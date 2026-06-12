@@ -5,6 +5,7 @@ import type { AuditRequest, OsvBatchResponse, PackageAuditReport } from './types
 
 export async function fetchPackageAuditReports(
   requests: AuditRequest[],
+  signal?: AbortSignal,
 ): Promise<Map<string, PackageAuditReport>> {
   const reports = new Map<string, PackageAuditReport>()
   const dedupedRequests = Array.from(
@@ -26,6 +27,7 @@ export async function fetchPackageAuditReports(
     const response = await fetch(OSV_QUERY_BATCH_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      signal,
       body: JSON.stringify({
         queries: chunk.map(request => ({
           package: { ecosystem: 'npm', name: request.name },

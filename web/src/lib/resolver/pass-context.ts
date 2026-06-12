@@ -3,6 +3,7 @@ import { fetchPackument, getAllVersions, getPreferredStableVersions } from '@/li
 import { getRestrictionKey, type RestrictionState } from '@/lib/restrictions'
 import { isEngineCompatible } from '@/lib/semver-utils'
 import { getDependencyRangeCandidates, getPreferredSection } from './state-helpers'
+import { throwIfAborted } from './abort'
 import type {
   DependencySection,
   PackageState,
@@ -57,6 +58,8 @@ export interface ResolutionContext {
   requestedPlatformSelection: PlatformSelection
   recommendedUnfreezeNames: Set<string>
   fixRecommendations: Set<string>
+  signal?: AbortSignal
+  throwIfAborted(): void
   registerTraversal(name: string): void
   completeTraversal(name: string): void
   getPackumentCached(name: string): Promise<Awaited<ReturnType<typeof fetchPackument>>>
@@ -86,6 +89,10 @@ export function createResolutionContext(
   const discoveredTraversalNames = new Set<string>()
   const completedTraversalNames = new Set<string>()
 
+  function assertNotAborted() {
+    throwIfAborted(preferences.signal)
+  }
+
   function emitProgress() {
     preferences.onProgress?.({
       completed: completedTraversalNames.size,
@@ -112,6 +119,8 @@ export function createResolutionContext(
     requestedPlatformSelection: preferences.platformSelection ?? {},
     recommendedUnfreezeNames: new Set(),
     fixRecommendations: new Set(),
+    signal: preferences.signal,
+    throwIfAborted: assertNotAborted,
     registerTraversal(name) {
       if (discoveredTraversalNames.has(name)) {
         return
@@ -129,9 +138,10 @@ export function createResolutionContext(
       emitProgress()
     },
     async getPackumentCached(name) {
+      assertNotAborted()
       const cached = packumentCache.get(name)
       if (cached) return cached
-      const packument = await fetchPackument(name)
+      const packument = await fetchPackument(name, preferences.signal)
       packumentCache.set(name, packument)
       return packument
     },
@@ -143,6 +153,7 @@ export function createResolutionContext(
       ctx.fixRecommendations.add(`Remove the override/freeze for ${name}: ${reason}`)
     },
     async getInstallTargetAnalysis(name, range) {
+      assertNotAborted()
       if (!semver.validRange(range)) {
         return { latestSatisfyingVersion: null, latestEngineCompatibleVersion: null, latestSatisfyingIsEngineCompatible: true }
       }
@@ -171,10 +182,12 @@ export function createResolutionContext(
       }
     },
     async getTransitiveOverridePlan(manifest) {
+      assertNotAborted()
       if (!manifest) return null
       const overrides: Record<string, string> = {}
       const entries = [...Object.entries(manifest.dependencies ?? {}), ...Object.entries(manifest.optionalDependencies ?? {})]
       for (const [name, range] of entries) {
+        assertNotAborted()
         const analysis = await ctx.getInstallTargetAnalysis(name, range)
         if (!analysis.latestSatisfyingVersion || !analysis.latestEngineCompatibleVersion) return null
         if (!analysis.latestSatisfyingIsEngineCompatible) overrides[name] = analysis.latestEngineCompatibleVersion
@@ -206,6 +219,7 @@ export function createResolutionContext(
     },
   }
 
+  assertNotAborted()
   emitProgress()
   return ctx
 }

@@ -17,10 +17,13 @@ interface Props {
   outputJson: string
   onForceOverrides: () => void
   onToggleMajorBuilds: () => void
+  onToggleTransitives: () => void
   onUseAsInput: (value: string) => void
   onInspectDependency: (packageName: string) => void
   forcedOverrideNames: string[]
   majorBuildsActive: boolean
+  transitiveDependencyNames: string[]
+  transitivesActive: boolean
   spaceIndentSize: SpaceIndentSize
   status: 'idle' | 'loading' | 'done' | 'error'
 }
@@ -30,10 +33,13 @@ export function OutputPane({
   outputJson,
   onForceOverrides,
   onToggleMajorBuilds,
+  onToggleTransitives,
   onUseAsInput,
   onInspectDependency,
   forcedOverrideNames,
   majorBuildsActive,
+  transitiveDependencyNames,
+  transitivesActive,
   spaceIndentSize,
   status,
 }: Props) {
@@ -74,6 +80,11 @@ export function OutputPane({
       .map(change => change.name)
       .filter(name => !overriddenNames.has(name))
   })()
+  const platformDependencyNames = result
+    ? result.changeSources
+      .filter(source => source.kind === 'platform')
+      .map(source => source.name)
+    : []
 
   function handleCopy() {
     if (result) {
@@ -112,6 +123,8 @@ export function OutputPane({
         onInspectDependency={onInspectDependency}
         highlightMajorBuildVersions={majorBuildsActive}
         overriddenDependencyNames={overriddenDependencyNames}
+        platformDependencyNames={platformDependencyNames}
+        transitiveDependencyNames={transitiveDependencyNames}
       />
     )
   }
@@ -128,6 +141,7 @@ export function OutputPane({
     return result.latestDependencyNames.filter(name => !overriddenDependencyNames.has(name))
   })()
   const majorBuildsDisabled = !result || status !== 'done' || (!majorBuildsActive && majorBuildNames.length === 0)
+  const transitivesDisabled = !result || status !== 'done' || (!transitivesActive && transitiveDependencyNames.length === 0)
 
   return (
     <div className="output-pane">
@@ -141,7 +155,7 @@ export function OutputPane({
               onClick={onForceOverrides}
               disabled={forceOverridesDisabled}
             >
-              Force Overrides
+              Overrides
             </button>
             <button
               type="button"
@@ -150,6 +164,14 @@ export function OutputPane({
               disabled={majorBuildsDisabled}
             >
               Major Builds
+            </button>
+            <button
+              type="button"
+              className={`output-pane__button${transitivesActive ? ' output-pane__button--transitives' : ''}`}
+              onClick={onToggleTransitives}
+              disabled={transitivesDisabled}
+            >
+              Transitives
             </button>
             <button
               type="button"

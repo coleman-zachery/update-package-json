@@ -13,12 +13,22 @@ export interface ResolveOptions {
 
 export type EngineName = 'node' | 'npm'
 export type DependencySection = 'dependencies' | 'devDependencies' | 'peerDependencies'
+export type ChangeSourceKind = 'peer' | 'platform' | 'companion' | 'override'
 
 export interface VersionChange {
   name: string
   from: string
   to: string
-  section: DependencySection | 'engines'
+  section: DependencySection | 'overrides' | 'engines'
+}
+
+export interface ChangeSourceHint {
+  name: string
+  source: string
+  kind: ChangeSourceKind
+  sourceVersion?: string
+  rootSource?: string
+  rootSourceVersion?: string
 }
 
 export interface AddedPeerDep {
@@ -43,6 +53,8 @@ export interface ResolveResult {
   latestDependencyNames: string[]
   staleDependencyNames: string[]
   changes: VersionChange[]
+  resolvedManifests: ResolvedManifest[]
+  changeSources: ChangeSourceHint[]
   addedPeerDeps: AddedPeerDep[]
   conflicts: string[]
   engineWarnings: string[]
@@ -77,6 +89,9 @@ export interface DeclaredNpmValue {
 export interface ResolvedManifest {
   name: string
   version: string
+  latestVersion: string | undefined
+  section: DependencySection
+  root: boolean
   manifest: VersionManifest
 }
 
@@ -110,6 +125,7 @@ export interface ResolutionPass {
   latestDependencyNames: string[]
   staleDependencyNames: string[]
   resolvedManifests: ResolvedManifest[]
+  changeSources: ChangeSourceHint[]
   transitiveOverrides: Array<{ name: string; version: string; source: string }>
   transitiveOverrideWarnings: string[]
   recommendedUnfreezeNames: string[]
@@ -130,6 +146,7 @@ export interface ResolveProgress {
 export interface ResolvePreferences {
   platformSelection?: PlatformSelection
   onProgress?: (progress: ResolveProgress) => void
+  signal?: AbortSignal
 }
 
 export interface PlatformResolutionIssue {

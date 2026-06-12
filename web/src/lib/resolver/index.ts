@@ -4,10 +4,12 @@ export { DEFAULT_PLATFORM_SELECTION, getPlatformSelectorState, normalizePlatform
 export type {
   AddedPeerDep,
   AuditStatus,
+  ChangeSourceHint,
   EngineName,
   EngineValidationIssue,
   InputValidationState,
   PlatformSupport,
+  ResolvedManifest,
   ResolvePreferences,
   ResolveProgress,
   ResolveOptions,

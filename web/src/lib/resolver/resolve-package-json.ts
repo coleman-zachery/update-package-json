@@ -2,6 +2,7 @@ import semver from 'semver'
 import { formatNpmPackageManager, getDependencyVersion, getStringOverrides, isNpmSupportAligned, isPinnedNpmVersion, isUnpinnedSemverRange, parsePackageJson, sortDependencies } from '@/lib/package-json'
 import { fetchLatestNodeVersion, fetchLatestNpmVersion } from '@/lib/npm'
 import { ENGINE_NPM_RESTRICTION_KEY, PACKAGE_MANAGER_NPM_RESTRICTION_KEY, getRestrictionKey, type RestrictionState } from '@/lib/restrictions'
+import { isAbortError, throwIfAborted } from './abort'
 import { pickCompatibleEngineVersion } from './engine-selection'
 import { formatEngineIssue, formatOutputNpmAlignmentWarning, formatPackageManagerIssue } from './messages'
 import { getPinnedPackageManagerVersion, getTrimmedString, selectDeclaredNpmValue } from './package-manager'
@@ -16,10 +17,11 @@ export async function resolvePackageJson(
   restrictions: RestrictionState = {},
   preferences: ResolvePreferences = {},
 ): Promise<ResolveResult> {
+  throwIfAborted(preferences.signal)
   const pkg = parsePackageJson(raw)
   const changes: VersionChange[] = []
-  const engineIssues = await validateDeclaredEngines(pkg.engines?.node, pkg.engines?.npm)
-  const packageManagerIssue = await validateDeclaredPackageManager(pkg.packageManager)
+  const engineIssues = await validateDeclaredEngines(pkg.engines?.node, pkg.engines?.npm, preferences.signal)
+  const packageManagerIssue = await validateDeclaredPackageManager(pkg.packageManager, preferences.signal)
   const { value: declaredNpm, source: declaredNpmSource } = selectDeclaredNpmValue(pkg, engineIssues, packageManagerIssue)
   const declaredEngineNpm = getTrimmedString(pkg.engines?.npm)
   const inputPackageManagerVersion = getPinnedPackageManagerVersion(pkg.packageManager)
@@ -35,13 +37,28 @@ export async function resolvePackageJson(
   const hasDetachedNpmRange = isUnpinnedSemverRange(declaredEngineNpm)
   const restrictedPackageManagerNpm = Boolean(restrictions[hasDetachedNpmRange ? PACKAGE_MANAGER_NPM_RESTRICTION_KEY : ENGINE_NPM_RESTRICTION_KEY])
   const shouldRetainDetachedPackageManager = hasDetachedNpmRange && restrictedPackageManagerNpm && !packageManagerIssue && Boolean(inputPackageManagerVersion)
-  let workingRootNode = !respectNode ? await fetchLatestNodeVersion().catch(() => rootNode) : rootNode
-  let workingRootNpm = !respectNpm ? await fetchLatestNpmVersion().catch(() => rootNpm) : rootNpm
+  let workingRootNode = !respectNode
+    ? await fetchLatestNodeVersion(preferences.signal).catch(error => {
+        if (isAbortError(error)) {
+          throw error
+        }
+        return rootNode
+      })
+    : rootNode
+  let workingRootNpm = !respectNpm
+    ? await fetchLatestNpmVersion(preferences.signal).catch(error => {
+        if (isAbortError(error)) {
+          throw error
+        }
+        return rootNpm
+      })
+    : rootNpm
   let resolution = await resolveWithEngines(pkg, options, restrictions, workingRootNode, workingRootNpm, Boolean(workingRootNode), Boolean(workingRootNpm), preferences)
 
   for (let pass = 0; pass < 3; pass++) {
-    const nextRootNode = await pickCompatibleEngineVersion('node', rootNode, resolution.resolvedManifests, respectNode, restrictedNode, options.addEnginesNode, options.avoidLatestVersions)
-    const nextRootNpm = await pickCompatibleEngineVersion('npm', rootNpm, resolution.resolvedManifests, respectNpm, restrictedNpm, options.addEnginesNpm, options.avoidLatestVersions)
+    throwIfAborted(preferences.signal)
+    const nextRootNode = await pickCompatibleEngineVersion('node', rootNode, resolution.resolvedManifests, respectNode, restrictedNode, options.addEnginesNode, options.avoidLatestVersions, preferences.signal)
+    const nextRootNpm = await pickCompatibleEngineVersion('npm', rootNpm, resolution.resolvedManifests, respectNpm, restrictedNpm, options.addEnginesNpm, options.avoidLatestVersions, preferences.signal)
     if ((nextRootNode ?? '') === (workingRootNode ?? '') && (nextRootNpm ?? '') === (workingRootNpm ?? '')) break
     workingRootNode = nextRootNode ?? workingRootNode
     workingRootNpm = nextRootNpm ?? workingRootNpm
@@ -56,6 +73,7 @@ export async function resolvePackageJson(
 
   const originalSections: Array<[DependencySection, Record<string, string> | undefined, Record<string, string>]> = [['dependencies', pkg.dependencies, resolvedSections.dependencies], ['devDependencies', pkg.devDependencies, resolvedSections.devDependencies], ['peerDependencies', pkg.peerDependencies, resolvedSections.peerDependencies]]
   for (const [section, originalSection, resolvedSection] of originalSections) {
+    throwIfAborted(preferences.signal)
     for (const [name, nextValue] of Object.entries(resolvedSection)) {
       const previousValue = originalSection?.[name]
       if (isMeaningfulDependencyChange(previousValue, nextValue)) changes.push({ name, from: previousValue ?? '(none)', to: nextValue, section })
@@ -85,14 +103,23 @@ export async function resolvePackageJson(
   if (resolution.transitiveOverrides.length > 0) {
     const nextOverrides = { ...(updated.overrides ?? {}) }
     let overridesChanged = !updated.overrides
-    for (const override of resolution.transitiveOverrides) { if (nextOverrides[override.name] === override.version) continue; nextOverrides[override.name] = override.version; overridesChanged = true }
+    for (const override of resolution.transitiveOverrides) { throwIfAborted(preferences.signal); if (nextOverrides[override.name] === override.version) continue; nextOverrides[override.name] = override.version; overridesChanged = true }
     if (overridesChanged) updated.overrides = sortOverrideEntries(nextOverrides)
   }
   if (Object.keys(getStringOverrides(updated)).length > 0) {
     const nextOverrides = { ...(updated.overrides ?? {}) }
     let overridesChanged = false
-    for (const name of Object.keys(getStringOverrides(updated))) { const mirroredVersion = getDependencyVersion(updated, name); if (!mirroredVersion || nextOverrides[name] === mirroredVersion) continue; nextOverrides[name] = mirroredVersion; overridesChanged = true }
+    for (const name of Object.keys(getStringOverrides(updated))) { throwIfAborted(preferences.signal); const mirroredVersion = getDependencyVersion(updated, name); if (!mirroredVersion || nextOverrides[name] === mirroredVersion) continue; nextOverrides[name] = mirroredVersion; overridesChanged = true }
     if (overridesChanged) updated.overrides = sortOverrideEntries(nextOverrides)
+  }
+
+  const originalOverrides = getStringOverrides(pkg)
+  const updatedOverrides = getStringOverrides(updated)
+  for (const [name, nextValue] of Object.entries(updatedOverrides)) {
+    const previousValue = originalOverrides[name]
+    if (isMeaningfulDependencyChange(previousValue, nextValue)) {
+      changes.push({ name, from: previousValue ?? '(none)', to: nextValue, section: 'overrides' })
+    }
   }
 
   return {
@@ -101,6 +128,8 @@ export async function resolvePackageJson(
     latestDependencyNames: resolution.latestDependencyNames,
     staleDependencyNames: resolution.staleDependencyNames,
     changes,
+    resolvedManifests: resolution.resolvedManifests,
+    changeSources: resolution.changeSources,
     addedPeerDeps: resolution.addedPeerDeps,
     conflicts: resolution.conflicts,
     engineWarnings: [...engineWarnings, ...resolution.engineWarnings, ...resolution.transitiveOverrideWarnings].filter(message => !((message.startsWith('engines.node ') && overriddenEngines.has('node')) || (message.startsWith('engines.npm ') && overriddenEngines.has('npm')) || (message.startsWith('packageManager ') && didOverrideNpm && declaredNpmSource === 'packageManager'))),
