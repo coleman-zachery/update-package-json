@@ -205,10 +205,14 @@ export function OptionsBar({
     options: Array<{ value: string; label: string; hint?: string }>,
   ) {
     const isRuntimeUnavailable = selectionKey === 'runtime' && options.length === 0
+    const isDisabled = Boolean(platformSelectors?.disabled) || isRuntimeUnavailable
     const selectedOption = options.find(option => option.value === value)
 
     return (
-      <Box className="options-bar__platform-field" data-platform-trigger={selectionKey}>
+      <Box
+        className={`options-bar__platform-field${isDisabled ? ' options-bar__platform-field--disabled' : ''}`}
+        data-platform-trigger={selectionKey}
+      >
         <Typography
           component="span"
           className="options-bar__platform-label"
@@ -224,14 +228,20 @@ export function OptionsBar({
           size="small"
           value={isRuntimeUnavailable ? '' : value}
           onChange={(event: SelectChangeEvent<string>) => platformSelectors?.onChange(selectionKey, event.target.value)}
-          open={openPlatformMenu === selectionKey}
-          onOpen={() => setOpenPlatformMenu(selectionKey)}
+          open={!isDisabled && openPlatformMenu === selectionKey}
+          onOpen={() => {
+            if (isDisabled) {
+              return
+            }
+
+            setOpenPlatformMenu(selectionKey)
+          }}
           onClose={() => setOpenPlatformMenu(current => (current === selectionKey ? null : current))}
-          disabled={platformSelectors?.disabled || isRuntimeUnavailable}
+          disabled={isDisabled}
           displayEmpty={isRuntimeUnavailable}
           SelectDisplayProps={{
             onMouseDown: event => {
-              if (isRuntimeUnavailable) {
+              if (isDisabled) {
                 return
               }
 

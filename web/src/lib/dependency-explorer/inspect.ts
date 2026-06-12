@@ -6,19 +6,17 @@ import { getContextDependencySections, getContextDependencyValue } from './conte
 import { buildRowData, finalizeRows, getDistinctMajorSeries, getSignatureKey } from './rows'
 import type {
   DependencyExplorerColumn,
-  DependencyExplorerPlatformDependency,
+  DependencyExplorerColumnKind,
   DependencyExplorerReport,
   DependencyExplorerRow,
 } from './types'
 
 function createColumn(
   name: string,
-  kind: DependencyExplorerColumn['kind'],
 ): DependencyExplorerColumn {
   return {
-    key: `${kind}:${name}`,
+    key: name,
     name,
-    kind,
   }
 }
 
@@ -36,10 +34,7 @@ export async function inspectDependencyPackage(
   const latestVersion = stableVersions[0] ?? packument['dist-tags']?.latest ?? ''
   const currentVersion = getContextDependencyValue(pkg, normalizedPackageName)
   const rows: DependencyExplorerRow[] = []
-  const dependencyColumns = new Set<string>()
-  const requiredPeerColumns = new Set<string>()
-  const optionalDependencyColumns = new Set<string>()
-  const platformDependencies = new Map<string, string[]>()
+  const columns = new Map<string, Set<DependencyExplorerColumnKind>>()
   let previousSignatureKey: string | null = null
 
   for (const version of stableVersions) {
@@ -49,20 +44,14 @@ export async function inspectDependencyPackage(
 
       const rowData = buildRowData(manifest, version)
       for (const dependency of rowData.directDependencies) {
-        if (dependency.kind === 'dependency') {
-          dependencyColumns.add(dependency.name)
-        } else if (dependency.kind === 'peer-required') {
-          requiredPeerColumns.add(dependency.name)
-        } else if (dependency.kind === 'optional') {
-          optionalDependencyColumns.add(dependency.name)
-        } else if (dependency.kind === 'platform-optional') {
-          const versions = platformDependencies.get(dependency.name) ?? []
-          versions.push(version)
-          platformDependencies.set(dependency.name, versions)
+        const currentKinds = columns.get(dependency.name) ?? new Set<DependencyExplorerColumnKind>()
+        for (const kind of dependency.columnKinds) {
+          currentKinds.add(kind)
         }
+        columns.set(dependency.name, currentKinds)
       }
 
-      const signatureKey = getSignatureKey(manifest, rowData.dependencyValues)
+      const signatureKey = getSignatureKey(manifest, rowData.dependencyCells)
       if (previousSignatureKey === signatureKey) {
         const previousRow = rows[rows.length - 1]
         if (previousRow) {
@@ -81,7 +70,7 @@ export async function inspectDependencyPackage(
         engineNode: rowData.engineNode ? formatCompactSemverRange(rowData.engineNode) : '-',
         engineNpm: rowData.engineNpm ? formatCompactSemverRange(rowData.engineNpm) : '-',
         directDependencies: rowData.directDependencies,
-        dependencyValues: rowData.dependencyValues,
+        dependencyCells: rowData.dependencyCells,
       })
     } catch {
       continue
@@ -100,21 +89,9 @@ export async function inspectDependencyPackage(
     currentResolvedVersion,
     currentSections: getContextDependencySections(pkg, normalizedPackageName),
     majorSeries: getDistinctMajorSeries(stableVersions),
-    dependencyColumns: Array.from(dependencyColumns)
+    columns: Array.from(columns.keys())
       .sort((left, right) => left.localeCompare(right))
-      .map(name => createColumn(name, 'dependency')),
-    requiredPeerColumns: Array.from(requiredPeerColumns)
-      .sort((left, right) => left.localeCompare(right))
-      .map(name => createColumn(name, 'peer-required')),
-    optionalDependencyColumns: Array.from(optionalDependencyColumns)
-      .sort((left, right) => left.localeCompare(right))
-      .map(name => createColumn(name, 'optional')),
-    platformDependencies: Array.from(platformDependencies.entries())
-      .map(([name, versions]) => ({
-        name,
-        versions: [...versions],
-      } satisfies DependencyExplorerPlatformDependency))
-      .sort((left, right) => left.name.localeCompare(right.name)),
+      .map(name => createColumn(name)),
     rows: finalizeRows(rows),
   }
 }

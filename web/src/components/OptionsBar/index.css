@@ -45,6 +45,14 @@
   flex: 0 0 var(--options-bar-platform-field-width);
 }
 
+.options-bar__platform-field--disabled {
+  opacity: 0.58;
+}
+
+.options-bar__platform-field--disabled .options-bar__platform-label {
+  color: color-mix(in srgb, var(--options-bar-platform-accent) 58%, var(--text-muted));
+}
+
 .options-bar__platform-label {
   color: var(--options-bar-platform-accent);
   font-size: 0.76rem;

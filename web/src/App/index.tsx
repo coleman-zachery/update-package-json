@@ -1,3 +1,4 @@
+import semver from 'semver'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppHeader } from '@/components/AppHeader'
 import { DependencyExplorer } from '@/components/DependencyExplorer'
@@ -96,6 +97,19 @@ function getPendingForcedOverrideNames(result: ResolveResult): string[] {
   return result.staleDependencyNames.filter(name => !existingOverrideNames.has(name))
 }
 
+function normalizeComparableVersion(value: string | undefined): string | null {
+  if (!value) {
+    return null
+  }
+
+  const normalized = value.replace(/^[\^~]/, '').trim()
+  if (semver.valid(normalized)) {
+    return normalized
+  }
+
+  return semver.minVersion(value)?.version ?? null
+}
+
 export default function App() {
   const [input, setInput] = useState('')
   const [spaceIndentSize, setSpaceIndentSize] = useState<SpaceIndentSize>(2)
@@ -148,13 +162,88 @@ export default function App() {
       return []
     }
 
-    return [
-      ...new Set(
-        result.changeSources
-          .filter(source => source.kind === 'companion')
-          .map(source => source.name),
-      ),
+    const rootPackageNames = [
+      ...new Set([
+        ...Object.keys(result.updatedPackage.dependencies ?? {}),
+        ...Object.keys(result.updatedPackage.devDependencies ?? {}),
+        ...Object.keys(result.updatedPackage.peerDependencies ?? {}),
+        ...Object.keys(result.updatedPackage.optionalDependencies ?? {}),
+      ]),
     ]
+    if (rootPackageNames.length === 0) {
+      return []
+    }
+
+    const rootPackageNameSet = new Set(rootPackageNames)
+    const manifestsByName = new Map(result.resolvedManifests.map(manifest => [manifest.name, manifest]))
+    const protectedNames = new Set([
+      ...result.changeSources
+        .filter(source => source.kind === 'platform' || source.kind === 'peer')
+        .map(source => source.name),
+      ...Object.keys(result.updatedPackage.peerDependencies ?? {}),
+      ...Object.keys(result.updatedPackage.optionalDependencies ?? {}),
+    ])
+    const adjacency = new Map<string, string[]>()
+
+    for (const sourceName of rootPackageNames) {
+      const sourceManifest = manifestsByName.get(sourceName)?.manifest
+      if (!sourceManifest) {
+        adjacency.set(sourceName, [])
+        continue
+      }
+
+      const dependencyTargets = new Set<string>()
+      for (const [dependencyName, dependencyRange] of Object.entries(sourceManifest.dependencies ?? {})) {
+        if (!rootPackageNameSet.has(dependencyName) || !semver.validRange(dependencyRange)) {
+          continue
+        }
+
+        const resolvedVersion = manifestsByName.get(dependencyName)?.version
+          ?? result.updatedPackage.dependencies?.[dependencyName]
+          ?? result.updatedPackage.devDependencies?.[dependencyName]
+          ?? result.updatedPackage.peerDependencies?.[dependencyName]
+          ?? result.updatedPackage.optionalDependencies?.[dependencyName]
+        const normalizedResolvedVersion = normalizeComparableVersion(resolvedVersion)
+        if (!normalizedResolvedVersion || !semver.satisfies(normalizedResolvedVersion, dependencyRange)) {
+          continue
+        }
+
+        dependencyTargets.add(dependencyName)
+      }
+
+      adjacency.set(sourceName, Array.from(dependencyTargets))
+    }
+
+    const transitivelyReducibleRoots = rootPackageNames.filter(name => !protectedNames.has(name))
+    const reachableNames = new Set<string>()
+    for (const rootName of transitivelyReducibleRoots) {
+      const pendingTargets = [...(adjacency.get(rootName) ?? [])]
+      const seenTargets = new Set<string>()
+
+      while (pendingTargets.length > 0) {
+        const targetName = pendingTargets.pop()
+        if (!targetName || targetName === rootName || seenTargets.has(targetName)) {
+          continue
+        }
+
+        seenTargets.add(targetName)
+        reachableNames.add(targetName)
+
+        if (protectedNames.has(targetName)) {
+          continue
+        }
+
+        for (const nextTarget of adjacency.get(targetName) ?? []) {
+          if (!seenTargets.has(nextTarget)) {
+            pendingTargets.push(nextTarget)
+          }
+        }
+      }
+    }
+
+    return rootPackageNames
+      .filter(name => reachableNames.has(name) && !protectedNames.has(name))
+      .sort((left, right) => left.localeCompare(right))
   }, [result])
 
   const outputPackage = useMemo(() => {

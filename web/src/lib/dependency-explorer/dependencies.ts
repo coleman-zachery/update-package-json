@@ -2,7 +2,11 @@ import semver from 'semver'
 import type { VersionManifest } from '@/lib/npm'
 import { formatCompactSemverRange } from '@/lib/semver-display'
 import { extractPlatformSuffix } from '@/lib/resolver/platform-targets'
-import type { DependencyExplorerDependencyEntry, DependencyExplorerDependencyKind } from './types'
+import type {
+  DependencyExplorerColumnKind,
+  DependencyExplorerDependencyEntry,
+  DependencyExplorerDependencyKind,
+} from './types'
 
 function safeFormatCompactSemverRange(range: string): string {
   try {
@@ -18,10 +22,12 @@ function buildDependencyEntry(
   kind: DependencyExplorerDependencyKind,
   packageVersion: string,
 ): DependencyExplorerDependencyEntry {
+  const columnKinds = getColumnKinds(kind)
   const compactRange = safeFormatCompactSemverRange(range)
   return {
     key: `${kind}:${name}:${range}`,
-    columnKey: `${kind}:${name}`,
+    columnKey: name,
+    columnKinds,
     displayRange: compactRange,
     rawRange: range,
     name,
@@ -30,11 +36,31 @@ function buildDependencyEntry(
   }
 }
 
+function getColumnKinds(kind: DependencyExplorerDependencyKind): DependencyExplorerColumnKind[] {
+  if (kind === 'peer-required') {
+    return ['peer']
+  }
+
+  if (kind === 'peer-optional') {
+    return ['peer', 'optional']
+  }
+
+  if (kind === 'platform-optional') {
+    return ['optional', 'platform']
+  }
+
+  if (kind === 'optional') {
+    return ['optional']
+  }
+
+  return ['required']
+}
+
 export function getDirectDependencies(
   manifest: VersionManifest,
   packageVersion: string,
 ): DependencyExplorerDependencyEntry[] {
-  return [
+  const entries = [
     ...Object.entries(manifest.peerDependencies ?? {}).map(([name, range]) => buildDependencyEntry(
       name,
       range,
@@ -53,7 +79,9 @@ export function getDirectDependencies(
       extractPlatformSuffix(name) ? 'platform-optional' : 'optional',
       packageVersion,
     )),
-  ].sort((left, right) => {
+  ]
+
+  return entries.sort((left, right) => {
     const kindOrder: Record<DependencyExplorerDependencyKind, number> = {
       'peer-required': 0,
       dependency: 1,
