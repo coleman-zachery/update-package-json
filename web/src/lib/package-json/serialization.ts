@@ -26,8 +26,32 @@ export function parsePackageJson(raw: string): PackageJson {
 }
 
 function reorderPackageManagerBeforeEngines(pkg: PackageJson): PackageJson {
-  if (!('packageManager' in pkg) || !('engines' in pkg)) {
+  if (!('packageManager' in pkg) && !('engines' in pkg)) {
     return pkg
+  }
+
+  if (!('scripts' in pkg)) {
+    if (!('packageManager' in pkg) || !('engines' in pkg)) {
+      return pkg
+    }
+
+    const ordered: PackageJson = {}
+    let insertedNpmBlock = false
+
+    for (const key of Object.keys(pkg)) {
+      if (key === 'packageManager' || key === 'engines') {
+        if (key === 'engines' && !insertedNpmBlock) {
+          ordered.packageManager = pkg.packageManager
+          ordered.engines = pkg.engines
+          insertedNpmBlock = true
+        }
+        continue
+      }
+
+      ordered[key] = pkg[key]
+    }
+
+    return ordered
   }
 
   const ordered: PackageJson = {}
@@ -35,15 +59,29 @@ function reorderPackageManagerBeforeEngines(pkg: PackageJson): PackageJson {
 
   for (const key of Object.keys(pkg)) {
     if (key === 'packageManager' || key === 'engines') {
-      if (key === 'engines' && !insertedNpmBlock) {
-        ordered.packageManager = pkg.packageManager
-        ordered.engines = pkg.engines
-        insertedNpmBlock = true
-      }
       continue
     }
 
+    if (key === 'scripts' && !insertedNpmBlock) {
+      if ('packageManager' in pkg) {
+        ordered.packageManager = pkg.packageManager
+      }
+      if ('engines' in pkg) {
+        ordered.engines = pkg.engines
+      }
+      insertedNpmBlock = true
+    }
+
     ordered[key] = pkg[key]
+  }
+
+  if (!insertedNpmBlock) {
+    if ('packageManager' in pkg) {
+      ordered.packageManager = pkg.packageManager
+    }
+    if ('engines' in pkg) {
+      ordered.engines = pkg.engines
+    }
   }
 
   return ordered

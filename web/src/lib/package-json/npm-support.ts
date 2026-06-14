@@ -68,7 +68,7 @@ export function upsertEngineValue(raw: string, engineName: 'node' | 'npm', value
     : { ...pkg, engines: { ...(pkg.engines ?? {}), [engineName]: value } }
 
   return serializePackageJson(updated, indentStyle, {
-    packageManagerBeforeEngines: engineName === 'npm' && typeof pkg.packageManager !== 'string',
+    packageManagerBeforeEngines: Boolean(updated.engines) || typeof updated.packageManager === 'string',
   })
 }
 

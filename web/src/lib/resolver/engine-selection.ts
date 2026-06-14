@@ -1,5 +1,5 @@
 import semver from 'semver'
-import { fetchNodeVersions, fetchPackument, getAllVersions } from '@/lib/npm'
+import { fetchPackument, getAllVersions, fetchPreferredNodeVersions } from '@/lib/npm'
 import { filterStable } from '@/lib/semver-utils'
 import { getPreferredResolvedVersion } from './state-helpers'
 import { throwIfAborted } from './abort'
@@ -21,7 +21,7 @@ export async function pickCompatibleEngineVersion(
   }
 
   let versions = engineName === 'node'
-    ? await fetchNodeVersions(signal)
+    ? await fetchPreferredNodeVersions(signal)
     : filterStable(getAllVersions(await fetchPackument('npm', signal)))
   const declaredRange = declaredValue && semver.validRange(declaredValue)
 

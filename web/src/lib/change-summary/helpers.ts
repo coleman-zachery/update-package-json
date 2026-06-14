@@ -3,30 +3,14 @@ import type {
   AddedPeerDep,
   ChangeSourceHint,
   ResolvedManifest,
-  ResolveResult,
   VersionChange,
 } from '@/lib/resolver'
+import type {
+  VersionChangeDirection,
+  VersionChangeEntry,
+} from './index'
 
-export type VersionChangeDirection = 'added' | 'upgraded' | 'downgraded'
-
-export interface VersionChangeEntry {
-  name: string
-  from: string | null
-  to: string
-  direction: VersionChangeDirection
-  isPlatform: boolean
-  reason?: string
-  outputTone: 'upgrade' | 'downgrade'
-}
-
-export interface ChangeSummary {
-  hasAnything: boolean
-  engineChanges: VersionChange[]
-  versionChanges: VersionChangeEntry[]
-  unresolvedPeerDependencies: AddedPeerDep[]
-}
-
-function normalizeVersion(value: string | null | undefined): string | null {
+export function normalizeVersion(value: string | null | undefined): string | null {
   if (!value || value === '(none)') {
     return null
   }
@@ -39,7 +23,7 @@ function normalizeVersion(value: string | null | undefined): string | null {
   return semver.minVersion(value)?.version ?? null
 }
 
-function getChangeDirection(change: VersionChange): VersionChangeDirection | null {
+export function getChangeDirection(change: VersionChange): VersionChangeDirection | null {
   if (change.section === 'engines') {
     return null
   }
@@ -130,11 +114,10 @@ function findDowngradeReason(
         return null
       }
 
-      const matchesHint = sourceHint?.source === manifest.name
       return {
         manifest,
         index,
-        matchesHint,
+        matchesHint: sourceHint?.source === manifest.name,
       }
     })
     .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
@@ -158,7 +141,7 @@ function findDowngradeReason(
   return sourceHint ? createSourceLabel(sourceHint, manifestsByName, change.to) : undefined
 }
 
-function createVersionChangeEntry(
+export function createVersionChangeEntry(
   change: VersionChange,
   manifests: ResolvedManifest[],
   manifestsByName: Map<string, ResolvedManifest>,
@@ -195,32 +178,8 @@ function createVersionChangeEntry(
   }
 }
 
-export function createChangeSummary(result: ResolveResult): ChangeSummary {
-  const unresolvedPeerDependencies = result.addedPeerDeps.filter(peerDep => peerDep.unresolved)
-  const unresolvedPeerNames = new Set(unresolvedPeerDependencies.map(peerDep => peerDep.name))
-  const manifestsByName = new Map(result.resolvedManifests.map(manifest => [manifest.name, manifest]))
-  const sourceHintsByName = new Map(result.changeSources.map(hint => [hint.name, hint]))
-  const orderedChanges = Array.from(new Map(
-    result.changes
-      .filter(change => change.section !== 'engines' && !unresolvedPeerNames.has(change.name))
-      .map(change => [change.name, change]),
-  ).values())
-
-  const versionChanges = orderedChanges
-    .map(change => createVersionChangeEntry(change, result.resolvedManifests, manifestsByName, sourceHintsByName))
-    .filter((entry): entry is VersionChangeEntry => Boolean(entry))
-
-  return {
-    hasAnything:
-      result.auditStatus.state !== 'pass' ||
-      result.changes.length > 0 ||
-      result.addedPeerDeps.length > 0 ||
-      result.conflicts.length > 0 ||
-      result.engineWarnings.length > 0 ||
-      result.engineOverrides.length > 0 ||
-      result.fixRecommendations.length > 0,
-    engineChanges: result.changes.filter(change => change.section === 'engines'),
-    versionChanges,
-    unresolvedPeerDependencies,
-  }
+export function getUnresolvedPeerNames(
+  unresolvedPeerDependencies: AddedPeerDep[],
+): Set<string> {
+  return new Set(unresolvedPeerDependencies.map(peerDep => peerDep.name))
 }

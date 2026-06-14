@@ -7,7 +7,7 @@ import { parsePackageJson, serializePackageJson } from './serialization'
 import type { PackageJson } from './types'
 
 export function shouldPlacePackageManagerBeforeEngines(pkg: PackageJson): boolean {
-  return typeof pkg.packageManager === 'string' && Boolean(pkg.engines)
+  return typeof pkg.packageManager === 'string' || Boolean(pkg.engines)
 }
 
 export function serializeMutatedPackage(
