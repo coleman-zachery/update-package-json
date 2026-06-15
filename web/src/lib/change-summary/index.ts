@@ -1,3 +1,4 @@
+import type { PackageJson } from '@/lib/package-json'
 import type {
   AddedPeerDep,
   ResolveResult,
@@ -7,6 +8,7 @@ import {
   createVersionChangeEntry,
   getUnresolvedPeerNames,
 } from './helpers'
+import { createVersionChangeOverridesSummary } from './override-summary'
 
 export type VersionChangeDirection = 'added' | 'upgraded' | 'downgraded'
 
@@ -14,10 +16,11 @@ export interface VersionChangeEntry {
   name: string
   from: string | null
   to: string
+  displayTo: string
   direction: VersionChangeDirection
   isPlatform: boolean
   reason?: string
-  outputTone: 'upgrade' | 'downgrade'
+  outputTone: 'upgrade' | 'downgrade' | 'override'
 }
 
 export interface ChangeSummary {
@@ -27,7 +30,13 @@ export interface ChangeSummary {
   unresolvedPeerDependencies: AddedPeerDep[]
 }
 
-export function createChangeSummary(result: ResolveResult): ChangeSummary {
+export function createChangeSummary(
+  result: ResolveResult,
+  options: {
+    inputPackage?: PackageJson
+    displayPackage?: PackageJson | null
+  } = {},
+): ChangeSummary {
   const unresolvedPeerDependencies = result.addedPeerDeps.filter(peerDep => peerDep.unresolved)
   const unresolvedPeerNames = getUnresolvedPeerNames(unresolvedPeerDependencies)
   const manifestsByName = new Map(result.resolvedManifests.map(manifest => [manifest.name, manifest]))
@@ -39,8 +48,35 @@ export function createChangeSummary(result: ResolveResult): ChangeSummary {
   ).values())
 
   const versionChanges = orderedChanges
-    .map(change => createVersionChangeEntry(change, result.resolvedManifests, manifestsByName, sourceHintsByName))
+    .map(change => createVersionChangeEntry(
+      change,
+      result.resolvedManifests,
+      manifestsByName,
+      sourceHintsByName,
+      options.displayPackage ?? null,
+    ))
     .filter((entry): entry is VersionChangeEntry => Boolean(entry))
+  const versionChangesByName = new Map(versionChanges.map(change => [change.name, change]))
+  const overrideSummaries = createVersionChangeOverridesSummary(
+    options.inputPackage ?? {},
+    options.displayPackage ?? null,
+    manifestsByName,
+  )
+
+  for (const overrideSummary of overrideSummaries) {
+    const existing = versionChangesByName.get(overrideSummary.name)
+    if (existing) {
+      if (!existing.reason) {
+        existing.reason = overrideSummary.reason
+      } else if (overrideSummary.reason && !existing.reason.includes(overrideSummary.reason)) {
+        existing.reason = `${existing.reason}; ${overrideSummary.reason}`
+      }
+      continue
+    }
+
+    versionChanges.push(overrideSummary)
+    versionChangesByName.set(overrideSummary.name, overrideSummary)
+  }
 
   return {
     hasAnything:

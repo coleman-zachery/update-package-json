@@ -5,6 +5,7 @@ import {
   parsePlatformTarget,
   selectionLabel,
 } from './helpers'
+import { PLATFORM_RUNTIME_NONE } from './constants'
 import type {
   ParsedPlatformTarget,
   PlatformResolutionIssue,
@@ -121,13 +122,16 @@ export function resolvePlatformSelection(
     return { selectedTargets: [matches[0].raw], unresolvedTargets: [], issues: [] }
   }
 
-  const fallbackMatches = normalized.runtime
+  const shouldFallbackFromRuntime = Boolean(
+    normalized.runtime && normalized.runtime !== PLATFORM_RUNTIME_NONE,
+  )
+  const fallbackMatches = shouldFallbackFromRuntime
     ? parsedTargets.filter(target => matchesSelection(target, {
       os: normalized.os,
       arch: normalized.arch,
     }))
     : matches
-  if (matches.length === 0 && normalized.runtime && fallbackMatches.length === 1) {
+  if (matches.length === 0 && shouldFallbackFromRuntime && fallbackMatches.length === 1) {
     return { selectedTargets: [fallbackMatches[0].raw], unresolvedTargets: [], issues: [] }
   }
 

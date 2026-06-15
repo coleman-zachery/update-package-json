@@ -3,7 +3,7 @@ import type { PlatformSelection } from './types'
 export const OS_LABELS: Record<string, string> = {
   aix: 'AIX',
   android: 'Android',
-  darwin: 'macOS',
+  darwin: 'Darwin',
   freebsd: 'FreeBSD',
   linux: 'Linux',
   netbsd: 'NetBSD',
@@ -16,11 +16,11 @@ export const OS_LABELS: Record<string, string> = {
 
 export const OS_HINTS: Partial<Record<keyof typeof OS_LABELS, string>> = {
   aix: 'aix',
-  darwin: 'Darwin',
-  openharmony: 'ohos',
+  darwin: 'MacOS',
+  openharmony: 'OHOS',
   sunos: 'Solaris',
   wasm32: 'wasm32',
-  win32: 'win32',
+  win32: 'Windows',
 }
 
 export const ARCH_LABELS: Record<string, string> = {
@@ -75,6 +75,8 @@ export const RUNTIME_HINTS: Partial<Record<keyof typeof RUNTIME_LABELS, string>>
   wasi: 'wasi',
 }
 
+export const PLATFORM_RUNTIME_NONE = 'none'
+
 export const TOKEN_ALIASES: Record<string, string> = {
   '32': 'ia32',
   '64': 'x64',
@@ -93,40 +95,33 @@ export const TOKEN_ALIASES: Record<string, string> = {
   x86_64: 'x64',
 }
 
-export const DEFAULT_PLATFORM_SELECTION: PlatformSelection = {
-  os: 'linux',
-  arch: 'x64',
-  runtime: 'gnu',
-}
+export const DEFAULT_PLATFORM_SELECTION: PlatformSelection = {}
 
-export const FALLBACK_OS_ARCH_OPTIONS: Partial<Record<string, string[]>> = {
-  aix: ['ppc64'],
-  android: ['arm', 'arm64', 'x64'],
-  darwin: ['arm64', 'universal', 'x64'],
-  freebsd: ['arm64', 'x64'],
-  linux: ['arm', 'arm64', 'ia32', 'loong64', 'mips64el', 'ppc64', 'ppc64le', 'riscv64', 's390x', 'x64'],
-  netbsd: ['arm64', 'x64'],
-  openbsd: ['arm64', 'x64'],
-  openharmony: ['arm64'],
-  sunos: ['x64'],
-  win32: ['arm64', 'ia32', 'x64'],
-}
+export const PLATFORM_OS_PRIORITY = ['linux', 'win32', 'darwin', 'android'] as const
 
-export const FALLBACK_RUNTIME_OPTIONS: Partial<Record<string, string[]>> = {
-  'android-arm': ['eabi', 'eabihf'],
-  'android-arm64': ['gnu'],
-  'android-x64': ['gnu'],
-  'linux-arm': ['eabi', 'eabihf', 'gnu', 'gnueabihf', 'musl', 'musleabihf'],
-  'linux-arm64': ['gnu', 'musl'],
-  'linux-ia32': ['gnu', 'musl'],
-  'linux-loong64': ['gnu', 'musl'],
-  'linux-mips64el': ['gnu', 'musl'],
-  'linux-ppc64': ['gnu'],
-  'linux-ppc64le': ['gnu', 'musl'],
-  'linux-riscv64': ['gnu', 'musl'],
-  'linux-s390x': ['gnu'],
-  'linux-x64': ['gnu', 'gnux32', 'musl'],
-  'win32-arm64': ['msvc'],
-  'win32-ia32': ['msvc'],
-  'win32-x64': ['msvc'],
-}
+export const PLATFORM_ARCH_ORDER = [
+  'x64',
+  'arm64',
+  'ia32',
+  'arm',
+  'universal',
+  'loong64',
+  'mips64el',
+  'ppc64',
+  'ppc64le',
+  'riscv64',
+  's390x',
+] as const
+
+export const PLATFORM_RUNTIME_ORDER = [
+  PLATFORM_RUNTIME_NONE,
+  'gnu',
+  'musl',
+  'msvc',
+  'eabihf',
+  'eabi',
+  'gnueabihf',
+  'gnux32',
+  'musleabihf',
+  'wasi',
+] as const

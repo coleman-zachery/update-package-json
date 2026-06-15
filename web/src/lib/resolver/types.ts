@@ -45,6 +45,7 @@ export interface AuditStatus {
   warnings: number
   vulnerabilities: number
   recommendedUnfreezeNames: string[]
+  recommendedRemovalNames: string[]
 }
 
 export interface ResolveResult {
@@ -60,6 +61,7 @@ export interface ResolveResult {
   engineWarnings: string[]
   engineOverrides: string[]
   recommendedUnfreezeNames: string[]
+  recommendedRemovalNames: string[]
   fixRecommendations: string[]
   platformSupport: PlatformSupport
 }
@@ -129,6 +131,7 @@ export interface ResolutionPass {
   transitiveOverrides: Array<{ name: string; version: string; source: string }>
   transitiveOverrideWarnings: string[]
   recommendedUnfreezeNames: string[]
+  recommendedRemovalNames: string[]
   fixRecommendations: string[]
   platformSupport: PlatformSupport
 }

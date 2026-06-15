@@ -135,10 +135,17 @@ export async function resolvePackageJson(
     ...resolution.recommendedUnfreezeNames,
     ...resolution.auditStatus.recommendedUnfreezeNames,
   ])).sort((left, right) => left.localeCompare(right))
+  const recommendedRemovalNames = Array.from(new Set([
+    ...resolution.recommendedRemovalNames,
+    ...resolution.auditStatus.recommendedRemovalNames,
+  ])).sort((left, right) => left.localeCompare(right))
   const fixRecommendations = [
     ...resolution.fixRecommendations,
     ...resolution.auditStatus.recommendedUnfreezeNames.map(
       name => `Remove the override/freeze for ${name}: it is blocking an available audit-safe version.`,
+    ),
+    ...recommendedRemovalNames.map(
+      name => `Remove ${name}: no stable version can satisfy the current dependency graph without vulnerable transitive packages.`,
     ),
   ].sort((left, right) => left.localeCompare(right))
   syncResolvedOverrides(pkg, updated, resolution, changes, preferences.signal)
@@ -166,6 +173,7 @@ export async function resolvePackageJson(
       ),
     ],
     recommendedUnfreezeNames,
+    recommendedRemovalNames,
     fixRecommendations,
     platformSupport: resolution.platformSupport,
   }

@@ -8,6 +8,10 @@ export interface PlatformOption {
   value: string
   label: string
   hint?: string
+  group?: string
+  groupHint?: string
+  hintDetail?: string
+  selectedLabel?: string
 }
 
 export interface PlatformResolutionIssue {
@@ -17,6 +21,9 @@ export interface PlatformResolutionIssue {
   candidates: string[]
 }
 
-export interface ParsedPlatformTarget extends PlatformSelection {
+export interface ParsedPlatformTarget {
   raw: string
+  os: string
+  arch: string
+  runtime?: string
 }

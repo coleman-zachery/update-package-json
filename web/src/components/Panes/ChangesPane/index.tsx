@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { PaneState } from '@/components/PaneState'
 import { PaneHeader } from '@/components/Panes/PaneHeader'
 import { createChangeSummary } from '@/lib/change-summary'
+import type { PackageJson } from '@/lib/package-json'
 import type { ResolveProgress, ResolveResult } from '@/lib/resolver'
 import './index.css'
 
 interface Props {
+  inputPackage?: PackageJson
+  displayPackage?: PackageJson | null
   result: ResolveResult | null
   status: 'idle' | 'loading' | 'done' | 'error'
   progress?: ResolveProgress | null
@@ -28,6 +31,8 @@ function getAuditSectionClassName(state: ResolveResult['auditStatus']['state']):
 }
 
 export function ChangesPane({
+  inputPackage = {},
+  displayPackage = null,
   result,
   status,
   progress = null,
@@ -96,14 +101,14 @@ export function ChangesPane({
       engineChanges,
       versionChanges,
       unresolvedPeerDependencies,
-    } = createChangeSummary(result)
+    } = createChangeSummary(result, { inputPackage, displayPackage })
 
     return (
       <div ref={contentRef} className="changes-pane__content">
         <section className={getAuditSectionClassName(result.auditStatus.state)}>
           <h3>npm audit</h3>
           <p className="audit-summary__meta">
-            OSV-backed browser advisory check. {result.auditStatus.summary}
+            OSV-backed browser advisory check with deprecated dependency detection. {result.auditStatus.summary}
           </p>
           {result.auditStatus.details.length > 0 ? (
             <ul>
@@ -202,8 +207,14 @@ export function ChangesPane({
                         <span className={change.isPlatform ? 'summary-line__name summary-line__name--platform' : 'summary-line__name'}>{change.name}</span>{' '}
                       </>
                     )}
-                    <span className={change.outputTone === 'upgrade' ? 'summary-line__version-output summary-line__version-output--upgrade' : 'summary-line__version-output summary-line__version-output--downgrade'}>
-                      {change.to}
+                    <span className={
+                      change.outputTone === 'upgrade'
+                        ? 'summary-line__version-output summary-line__version-output--upgrade'
+                        : change.outputTone === 'override'
+                          ? 'summary-line__version-output summary-line__version-output--override'
+                          : 'summary-line__version-output summary-line__version-output--downgrade'
+                    }>
+                      {change.displayTo}
                     </span>
                     {change.reason ? (
                       <>

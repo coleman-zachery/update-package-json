@@ -1,0 +1,46 @@
+Update the dependency explorer/version change output logic.
+
+Context:
+The UI compares the input package.json against the generated output package.json and shows a “VERSION CHANGES” panel. Some dependencies are intentionally kept below the newest stable registry version because they must satisfy compatibility constraints from other dependencies. These should be described as downgraded pinned versions, not merely as “kept” or “not floating.”
+
+Goal:
+Whenever a dependency will exist in the output package.json at a version lower than the newest stable version, add/expose explanatory verbiage that says it is “pinned below latest” and includes which dependency or dependency chain requires it using “via” terminology.
+
+Desired output format:
+<package> <resolvedVersion> pinned below latest <latestStableVersion> via <requiringPackageList>
+
+Examples:
+eslint 9.39.4 pinned below latest 10.5.0 via @eslint/compat, eslint-plugin-import, eslint-plugin-jsx-a11y, eslint-plugin-prettier, eslint-plugin-react, eslint-plugin-react-hooks, eslint-plugin-react-refresh, typescript-eslint
+
+rolldown 1.0.3 pinned below latest 1.1.1 via vite
+
+Important semantics:
+- “latest” means newest stable build available from the registry, not prerelease/canary/nightly.
+- “resolvedVersion” means the version that will actually be written into the output package.json.
+- This message should only appear when resolvedVersion is lower than latestStableVersion.
+- This should apply to dependencies present in the output package.json, especially those pinned through overrides or compatibility resolution.
+- The “via” list should identify the dependency or dependencies whose requirements caused the lower version to be selected.
+- If there is a dependency path, prefer the clearest concise path. If there are multiple direct constraints, list them comma-separated.
+- Do not use wording like “pinned to keep X instead of floating to Y.” That does not explain the compatibility reason.
+- Avoid calling it an upgrade if the resolved output version is lower than latest.
+- Avoid implying the downgrade is arbitrary; it is compatibility-constrained.
+
+Implementation expectation:
+Find the code that builds the VERSION CHANGES output. Add detection for downgraded pinned output versions:
+1. Determine the output package version/resolved version.
+2. Determine the newest stable registry version.
+3. Compare semver, excluding prereleases from “latest stable.”
+4. If output/resolved < latest stable, look up the dependency constraint source(s).
+5. Render a line using:
+   <name> <resolved> pinned below latest <latest> via <source list>
+
+Preserve existing version-change output for normal upgrades where the selected version equals the newest stable version, and for transitive/platform package changes that are not written into the output package.json.
+
+Acceptance criteria:
+- eslint pinned to 9.39.4 while latest stable is 10.5.0 displays:
+  eslint 9.39.4 pinned below latest 10.5.0 via ...
+- rolldown pinned to 1.0.3 while latest stable is 1.1.1 displays:
+  rolldown 1.0.3 pinned below latest 1.1.1 via vite
+- No “pinned below latest” message appears when the output version is already the newest stable version.
+- The message uses “via” verbiage and includes the constraining dependency/dependencies.
+- The output remains readable in the existing VERSION CHANGES panel.

@@ -1,3 +1,4 @@
+import { getDependencyVersion, getStringOverrides, type PackageJson } from '@/lib/package-json'
 import semver from 'semver'
 import type {
   AddedPeerDep,
@@ -141,11 +142,25 @@ function findDowngradeReason(
   return sourceHint ? createSourceLabel(sourceHint, manifestsByName, change.to) : undefined
 }
 
+function getDisplayedVersion(
+  change: VersionChange,
+  displayPackage: PackageJson | null | undefined,
+): string {
+  if (!displayPackage) {
+    return change.to
+  }
+
+  return getDependencyVersion(displayPackage, change.name)
+    ?? getStringOverrides(displayPackage)[change.name]
+    ?? change.to
+}
+
 export function createVersionChangeEntry(
   change: VersionChange,
   manifests: ResolvedManifest[],
   manifestsByName: Map<string, ResolvedManifest>,
   sourceHintsByName: Map<string, ChangeSourceHint>,
+  displayPackage: PackageJson | null = null,
 ): VersionChangeEntry | null {
   const direction = getChangeDirection(change)
   if (!direction) {
@@ -171,13 +186,13 @@ export function createVersionChangeEntry(
     name: change.name,
     from: change.from === '(none)' ? null : change.from,
     to: change.to,
+    displayTo: getDisplayedVersion(change, displayPackage),
     direction: direction === 'added' ? 'added' : outputTone === 'upgrade' ? 'upgraded' : 'downgraded',
     isPlatform: sourceHint?.kind === 'platform',
     reason,
     outputTone,
   }
 }
-
 export function getUnresolvedPeerNames(
   unresolvedPeerDependencies: AddedPeerDep[],
 ): Set<string> {

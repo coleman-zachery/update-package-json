@@ -25,6 +25,7 @@ const MAJOR_BUILD_COLOR = '#b59eff'
 const OVERRIDDEN_DEPENDENCY_COLOR = '#ffbe5c'
 const PLATFORM_DEPENDENCY_COLOR = 'rgb(51, 187, 255)'
 const TRANSITIVE_DEPENDENCY_COLOR = 'rgb(160, 141, 118)'
+const UNRESOLVED_DEPENDENCY_COLOR = '#ffd866'
 
 class MarkerWidget extends WidgetType {
   constructor(private readonly markers: TextareaMarker[]) {
@@ -514,9 +515,83 @@ export function createTransitiveDependencyHighlightExtension(
   return [transitiveTheme, transitiveDecorations]
 }
 
+export function createUnresolvedDependencyHighlightExtension(
+  unresolvedDependencyNames: string[],
+): Extension {
+  if (unresolvedDependencyNames.length === 0) {
+    return []
+  }
+
+  const unresolvedNames = new Set(unresolvedDependencyNames)
+  const unresolvedTheme = EditorView.baseTheme({
+    '.cm-unresolved-dependency-name, .cm-unresolved-dependency-name span': {
+      color: `${UNRESOLVED_DEPENDENCY_COLOR} !important`,
+    },
+  })
+
+  const unresolvedDecorations = EditorView.decorations.of(view => {
+    const builder = new RangeSetBuilder<Decoration>()
+    let currentSection: string | null = null
+
+    for (let lineNumber = 1; lineNumber <= view.state.doc.lines; lineNumber += 1) {
+      const line = view.state.doc.line(lineNumber)
+      const text = line.text
+
+      const sectionMatch = text.match(/^\s*"([^"]+)"\s*:\s*{\s*$/)
+      if (sectionMatch) {
+        currentSection = STALE_DEPENDENCY_SECTIONS.has(sectionMatch[1]) ? sectionMatch[1] : null
+        continue
+      }
+
+      if (/^\s*},?\s*$/.test(text)) {
+        currentSection = null
+        continue
+      }
+
+      if (!currentSection) {
+        continue
+      }
+
+      const propertyMatch = text.match(/^(\s*"([^"]+)")\s*:\s*"([^"]*)"\s*,?\s*$/)
+      if (!propertyMatch) {
+        continue
+      }
+
+      const packageName = propertyMatch[2]
+      if (!unresolvedNames.has(packageName)) {
+        continue
+      }
+
+      const quotedToken = `"${packageName}"`
+      const quotedTokenStart = text.indexOf(quotedToken)
+      const nameStart = quotedTokenStart >= 0 ? quotedTokenStart + 1 : -1
+      if (nameStart < 0) {
+        continue
+      }
+
+      builder.add(
+        line.from + nameStart,
+        line.from + nameStart + packageName.length,
+        Decoration.mark({
+          class: 'cm-unresolved-dependency-name',
+          attributes: {
+            style: `color: ${UNRESOLVED_DEPENDENCY_COLOR} !important;`,
+          },
+        }),
+      )
+    }
+
+    return builder.finish()
+  })
+
+  return [unresolvedTheme, unresolvedDecorations]
+}
+
 export function createInspectableDependencyExtension(
   onInspectDependency: (packageName: string) => void,
+  unresolvedDependencyNames: string[] = [],
 ): Extension {
+  const unresolvedNames = new Set(unresolvedDependencyNames)
   const inspectableTheme = EditorView.baseTheme({
     '.cm-inspectable-dependency:hover, .cm-inspectable-dependency:hover span': {
       cursor: 'zoom-in',
@@ -569,7 +644,9 @@ export function createInspectableDependencyExtension(
           class: 'cm-inspectable-dependency',
           attributes: {
             'data-package-name': packageName,
-            title: `Inspect ${packageName}`,
+            title: unresolvedNames.has(packageName)
+              ? `${packageName} is unavailable or could not be fetched from the public npm registry`
+              : `Inspect ${packageName}`,
           },
         }),
       )

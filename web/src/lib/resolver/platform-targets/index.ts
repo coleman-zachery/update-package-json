@@ -4,6 +4,7 @@ import {
   normalizePlatformSelection,
 } from './helpers'
 export { coercePlatformSelection, getPlatformSelectorState } from './selectors'
+export { updatePlatformSelection } from './selectors'
 export {
   reconcilePlatformTargets,
   reconcilePlatformTargetsDetailed,

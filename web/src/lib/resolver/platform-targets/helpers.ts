@@ -1,10 +1,10 @@
 import {
-  ARCH_HINTS,
-  ARCH_LABELS,
-  FALLBACK_OS_ARCH_OPTIONS,
-  FALLBACK_RUNTIME_OPTIONS,
   OS_HINTS,
   OS_LABELS,
+  PLATFORM_ARCH_ORDER,
+  PLATFORM_OS_PRIORITY,
+  PLATFORM_RUNTIME_NONE,
+  PLATFORM_RUNTIME_ORDER,
   RUNTIME_HINTS,
   RUNTIME_LABELS,
   TOKEN_ALIASES,
@@ -16,8 +16,63 @@ import type {
 } from './types'
 
 export function uniq(values: Array<string | undefined>): string[] {
-  const next = new Set(values.filter(Boolean) as string[])
-  return Array.from(next).sort((left, right) => left.localeCompare(right))
+  return Array.from(new Set(values.filter(Boolean) as string[]))
+}
+
+export function sortValues(
+  values: Array<string | undefined>,
+  order: readonly string[],
+): string[] {
+  const orderMap = new Map(order.map((value, index) => [value, index]))
+
+  return uniq(values).sort((left, right) => {
+    const leftOrder = orderMap.get(left) ?? Number.MAX_SAFE_INTEGER
+    const rightOrder = orderMap.get(right) ?? Number.MAX_SAFE_INTEGER
+
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder
+    }
+
+    return left.localeCompare(right)
+  })
+}
+
+export function sortPlatformTargets(targets: ParsedPlatformTarget[]): ParsedPlatformTarget[] {
+  const osPriority = new Map<string, number>(
+    PLATFORM_OS_PRIORITY.map((value, index) => [value, index]),
+  )
+  const archOrder = new Map<string, number>(
+    PLATFORM_ARCH_ORDER.map((value, index) => [value, index]),
+  )
+  const runtimeOrder = new Map<string, number>(
+    PLATFORM_RUNTIME_ORDER.map((value, index) => [value, index]),
+  )
+
+  return [...targets].sort((left, right) => {
+    const leftPriority = osPriority.get(left.os)
+    const rightPriority = osPriority.get(right.os)
+
+    if (leftPriority != null || rightPriority != null) {
+      if (leftPriority == null) return 1
+      if (rightPriority == null) return -1
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority
+    } else {
+      const osDiff = (OS_LABELS[left.os] ?? left.os).localeCompare(OS_LABELS[right.os] ?? right.os)
+      if (osDiff !== 0) return osDiff
+    }
+
+    const archDiff = (archOrder.get(left.arch) ?? Number.MAX_SAFE_INTEGER)
+      - (archOrder.get(right.arch) ?? Number.MAX_SAFE_INTEGER)
+    if (archDiff !== 0) return archDiff
+
+    const leftRuntime = left.runtime ?? PLATFORM_RUNTIME_NONE
+    const rightRuntime = right.runtime ?? PLATFORM_RUNTIME_NONE
+    const runtimeDiff = (runtimeOrder.get(leftRuntime) ?? Number.MAX_SAFE_INTEGER)
+      - (runtimeOrder.get(rightRuntime) ?? Number.MAX_SAFE_INTEGER)
+    if (runtimeDiff !== 0) return runtimeDiff
+
+    return left.raw.localeCompare(right.raw)
+  })
 }
 
 export function normalizeToken(value: string): string {
@@ -25,6 +80,10 @@ export function normalizeToken(value: string): string {
 }
 
 export function normalizeRuntime(token: string): string {
+  if (token === PLATFORM_RUNTIME_NONE) {
+    return token
+  }
+
   if (token.startsWith('gnu')) {
     return token === 'gnueabihf' || token === 'gnux32' ? token : 'gnu'
   }
@@ -48,27 +107,26 @@ export function normalizePlatformSelection(
   }
 }
 
-export function toOsOption(value: string): PlatformOption {
-  return {
-    value,
-    label: OS_LABELS[value] ?? value,
-    hint: OS_HINTS[value as keyof typeof OS_HINTS],
-  }
-}
+export function toPlatformOption(target: ParsedPlatformTarget): PlatformOption {
+  const group = OS_LABELS[target.os] ?? target.os
+  const runtimeLabel = target.runtime ? (RUNTIME_LABELS[target.runtime] ?? target.runtime) : undefined
+  const groupHint = OS_HINTS[target.os as keyof typeof OS_HINTS]
+  const runtimeHint = target.runtime
+    ? RUNTIME_HINTS[target.runtime as keyof typeof RUNTIME_HINTS]
+    : undefined
 
-export function toArchOption(value: string): PlatformOption {
   return {
-    value,
-    label: ARCH_LABELS[value] ?? value,
-    hint: ARCH_HINTS[value as keyof typeof ARCH_HINTS],
-  }
-}
-
-export function toRuntimeOption(value: string): PlatformOption {
-  return {
-    value,
-    label: RUNTIME_LABELS[value] ?? value,
-    hint: RUNTIME_HINTS[value as keyof typeof RUNTIME_HINTS],
+    value: target.raw,
+    group,
+    groupHint: groupHint && groupHint.toLowerCase() !== group.toLowerCase() ? groupHint : undefined,
+    label: target.arch,
+    hint: runtimeLabel ? `+ ${runtimeLabel}` : undefined,
+    hintDetail: runtimeHint && runtimeHint.toLowerCase() !== runtimeLabel?.toLowerCase()
+      ? runtimeHint
+      : undefined,
+    selectedLabel: runtimeLabel
+      ? `${group} ${target.arch} + ${runtimeLabel}`
+      : `${group} ${target.arch}`,
   }
 }
 
@@ -79,7 +137,7 @@ export function parsePlatformTarget(raw: string): ParsedPlatformTarget | null {
   }
 
   const parsed: ParsedPlatformTarget = {
-    raw,
+    raw: tokens.join('-'),
     os: tokens[0],
     arch: tokens[1],
   }
@@ -114,13 +172,22 @@ export function matchesSelection(
   target: ParsedPlatformTarget,
   selection: PlatformSelection,
 ): boolean {
+  const expectsRuntimeNone = selection.runtime === PLATFORM_RUNTIME_NONE
+
   return (!selection.os || target.os === selection.os)
     && (!selection.arch || target.arch === selection.arch)
-    && (!selection.runtime || !target.runtime || target.runtime === selection.runtime)
+    && (
+      !selection.runtime
+      || (expectsRuntimeNone ? !target.runtime : target.runtime === selection.runtime)
+    )
 }
 
 export function selectionLabel(selection: PlatformSelection): string | null {
-  const parts = [selection.os, selection.arch, selection.runtime].filter(Boolean)
+  const parts = [
+    selection.os,
+    selection.arch,
+    selection.runtime && selection.runtime !== PLATFORM_RUNTIME_NONE ? selection.runtime : undefined,
+  ].filter(Boolean)
   return parts.length > 0 ? parts.join('-') : null
 }
 
@@ -130,38 +197,24 @@ export function parseAvailableTargets(rawTargets: string[]): ParsedPlatformTarge
     .filter((value): value is ParsedPlatformTarget => Boolean(value))
 }
 
-export function buildFallbackTargets(): ParsedPlatformTarget[] {
-  const targets: ParsedPlatformTarget[] = []
+export function getOsValues(values: Array<string | undefined>): string[] {
+  const uniqueValues = uniq(values)
+  const priority = Array.from(PLATFORM_OS_PRIORITY) as string[]
+  const prioritySet = new Set<string>(priority)
+  const remaining = uniqueValues
+    .filter(value => !prioritySet.has(value))
+    .sort((left, right) => (OS_LABELS[left] ?? left).localeCompare(OS_LABELS[right] ?? right))
 
-  for (const [os, archValues] of Object.entries(FALLBACK_OS_ARCH_OPTIONS)) {
-    for (const arch of archValues ?? []) {
-      const runtimeKey = `${os}-${arch}`
-      const runtimes = FALLBACK_RUNTIME_OPTIONS[runtimeKey]
-
-      if (!runtimes || runtimes.length === 0) {
-        targets.push({ raw: runtimeKey, os, arch })
-        continue
-      }
-
-      for (const runtime of runtimes) {
-        targets.push({
-          raw: `${runtimeKey}-${runtime}`,
-          os,
-          arch,
-          runtime,
-        })
-      }
-    }
-  }
-
-  return targets
+  return [
+    ...priority.filter(value => uniqueValues.includes(value)),
+    ...remaining,
+  ]
 }
 
-export function getSelectorTargets(rawTargets: string[]): ParsedPlatformTarget[] {
-  const parsedTargets = parseAvailableTargets(rawTargets)
-  return parsedTargets.length > 0 ? parsedTargets : buildFallbackTargets()
+export function getArchValues(values: Array<string | undefined>): string[] {
+  return sortValues(values, PLATFORM_ARCH_ORDER)
 }
 
-export function getFirstValue(values: string[]): string | undefined {
-  return values[0]
+export function getRuntimeValues(values: Array<string | undefined>): string[] {
+  return sortValues(values, PLATFORM_RUNTIME_ORDER)
 }

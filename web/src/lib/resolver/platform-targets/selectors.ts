@@ -1,81 +1,84 @@
 import {
-  getFirstValue,
-  getSelectorTargets,
+  matchesSelection,
   normalizePlatformSelection,
-  toArchOption,
-  toOsOption,
-  toRuntimeOption,
-  uniq,
+  sortPlatformTargets,
+  toPlatformOption,
 } from './helpers'
+import { getCanonicalPlatformTargets } from './catalog'
+import { PLATFORM_RUNTIME_NONE } from './constants'
 import type {
   PlatformOption,
+  ParsedPlatformTarget,
   PlatformSelection,
 } from './types'
 
 export { normalizePlatformSelection }
 
+function toSelection(target: ParsedPlatformTarget): PlatformSelection {
+  return {
+    os: target.os,
+    arch: target.arch,
+    runtime: target.runtime ?? PLATFORM_RUNTIME_NONE,
+  }
+}
+
+function findSelectedTarget(
+  rawTargets: string[],
+  selection: PlatformSelection,
+): ParsedPlatformTarget | null {
+  const normalized = normalizePlatformSelection(selection)
+  if (!normalized.os || !normalized.arch) {
+    return null
+  }
+
+  const targets = sortPlatformTargets(getCanonicalPlatformTargets(rawTargets))
+  const matches = targets.filter(target => matchesSelection(target, normalized))
+
+  if (normalized.runtime === PLATFORM_RUNTIME_NONE) {
+    return matches.find(target => !target.runtime) ?? null
+  }
+
+  if (normalized.runtime) {
+    return matches.find(target => target.runtime === normalized.runtime) ?? null
+  }
+
+  return matches.length === 1 ? matches[0] : null
+}
+
 export function coercePlatformSelection(
   rawTargets: string[],
   selection: PlatformSelection,
 ): PlatformSelection {
-  const normalized = normalizePlatformSelection(selection)
-  const targets = getSelectorTargets(rawTargets)
+  const target = findSelectedTarget(rawTargets, selection)
+  return target ? toSelection(target) : {}
+}
 
-  const osValues = uniq(targets.map(target => target.os))
-  const nextOs = normalized.os && osValues.includes(normalized.os)
-    ? normalized.os
-    : getFirstValue(osValues)
-
-  const archValues = uniq(
-    targets
-      .filter(target => !nextOs || target.os === nextOs)
-      .map(target => target.arch),
-  )
-  const nextArch = normalized.arch && archValues.includes(normalized.arch)
-    ? normalized.arch
-    : getFirstValue(archValues)
-
-  const runtimeValues = uniq(
-    targets
-      .filter(target => (!nextOs || target.os === nextOs) && (!nextArch || target.arch === nextArch))
-      .map(target => target.runtime),
-  )
-  const nextRuntime = normalized.runtime && runtimeValues.includes(normalized.runtime)
-    ? normalized.runtime
-    : getFirstValue(runtimeValues)
-
-  return {
-    os: nextOs,
-    arch: nextArch,
-    runtime: nextRuntime,
+export function updatePlatformSelection(
+  rawTargets: string[],
+  selection: PlatformSelection,
+  value: string,
+): PlatformSelection {
+  const current = findSelectedTarget(rawTargets, selection)
+  if (!value || current?.raw === value) {
+    return {}
   }
+
+  const next = getCanonicalPlatformTargets(rawTargets).find(target => target.raw === value)
+  return next ? toSelection(next) : {}
 }
 
 export function getPlatformSelectorState(
   rawTargets: string[],
   selection: PlatformSelection,
 ): {
-  osOptions: PlatformOption[]
-  archOptions: PlatformOption[]
-  runtimeOptions: PlatformOption[]
+  value: string
+  options: PlatformOption[]
 } {
-  const normalized = coercePlatformSelection(rawTargets, selection)
-  const targets = getSelectorTargets(rawTargets)
-  const osValues = uniq(targets.map(target => target.os))
-  const archValues = uniq(
-    targets
-      .filter(target => !normalized.os || target.os === normalized.os)
-      .map(target => target.arch),
-  )
-  const runtimeValues = uniq(
-    targets
-      .filter(target => (!normalized.os || target.os === normalized.os) && (!normalized.arch || target.arch === normalized.arch))
-      .map(target => target.runtime),
-  )
+  const selectedTarget = findSelectedTarget(rawTargets, selection)
+  const targets = sortPlatformTargets(getCanonicalPlatformTargets(rawTargets))
 
   return {
-    osOptions: osValues.map(value => toOsOption(value)),
-    archOptions: archValues.map(value => toArchOption(value)),
-    runtimeOptions: runtimeValues.map(value => toRuntimeOption(value)),
+    value: selectedTarget?.raw ?? '',
+    options: targets.map(toPlatformOption),
   }
 }

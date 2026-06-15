@@ -1,0 +1,182 @@
+.options-bar {
+  --options-bar-platform-field-width: 176px;
+  --options-bar-platform-accent: rgb(51, 187, 255);
+  --options-bar-platform-accent-soft: rgba(51, 187, 255, 0.72);
+  --options-bar-platform-text-selected: rgb(242, 240, 247);
+  --options-bar-platform-hint-selected: rgb(160, 143, 121);
+}
+
+.options-bar__platform-selectors {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.options-bar__platform-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 272px;
+  min-width: 272px;
+  flex: 0 0 272px;
+}
+
+.options-bar__platform-field--disabled {
+  opacity: 0.58;
+}
+
+.options-bar__platform-field--disabled .options-bar__platform-label {
+  color: color-mix(in srgb, var(--options-bar-platform-accent) 58%, var(--text-muted));
+}
+
+.options-bar__platform-label {
+  color: var(--options-bar-platform-accent);
+  font-size: 0.76rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-left: 2px;
+}
+
+.options-bar__platform-input {
+  position: relative;
+}
+
+.options-bar__platform-menu-paper {
+  --options-bar-platform-accent: rgb(51, 187, 255);
+  --options-bar-platform-accent-soft: rgba(51, 187, 255, 0.72);
+  --options-bar-platform-text-selected: rgb(242, 240, 247);
+  --options-bar-platform-hint-selected: rgb(160, 143, 121);
+  margin-top: 0.35rem;
+  border: 1px solid #6f647f;
+  border-radius: 10px;
+  background: #1f212d;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.38);
+  max-height: min(20rem, 32vh);
+  overflow-y: auto;
+}
+
+.options-bar__platform-menu-list {
+  padding-block: 0.24rem 0.32rem;
+}
+
+.options-bar__platform-clear {
+  position: absolute;
+  top: 50%;
+  right: 2rem;
+  transform: translateY(-50%);
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--options-bar-platform-hint-selected);
+  font: inherit;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.options-bar__platform-clear:hover {
+  background: color-mix(in srgb, var(--options-bar-platform-hint-selected) 14%, transparent);
+  color: var(--options-bar-platform-text-selected);
+}
+
+.options-bar__platform-value {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  width: 100%;
+}
+
+.options-bar__platform-value--menu {
+  margin-left: 1rem;
+  width: calc(100% - 1rem);
+}
+
+.options-bar__platform-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.options-bar__platform-text--menu,
+.options-bar__platform-text--selected {
+  color: var(--options-bar-platform-text-selected);
+}
+
+.options-bar__platform-hint {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.options-bar__platform-hint--menu {
+  color: var(--options-bar-platform-text-selected);
+}
+
+.options-bar__platform-hint--selected {
+  color: var(--options-bar-platform-hint-selected);
+}
+
+.options-bar__platform-hint-detail {
+  display: inline-block;
+  margin-left: 0.33rem;
+  color: var(--options-bar-platform-hint-selected) !important;
+  font-style: italic;
+}
+
+.options-bar__platform-none {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.options-bar__platform-group {
+  display: flex;
+  align-items: baseline;
+  gap: 0.38rem;
+  color: var(--options-bar-platform-text-selected);
+  background: #1f212d;
+  font-size: 0.74rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0.28rem 0.95rem 0.1rem;
+}
+
+.options-bar__platform-group-hint {
+  color: var(--options-bar-platform-hint-selected);
+  font-size: 0.7rem;
+  font-style: italic;
+  font-weight: 500;
+}
+
+.options-bar__platform-option {
+  min-height: 0;
+  padding: 0.16rem 0.9rem 0.16rem 1.7rem !important;
+}
+
+.options-bar__platform-option .options-bar__platform-text--menu {
+  padding-left: 0.2rem;
+}
+
+@media (max-width: 900px) {
+  .options-bar__platform-selectors {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .options-bar__platform-field {
+    width: auto;
+    min-width: 272px;
+    flex: 1 1 272px;
+  }
+}

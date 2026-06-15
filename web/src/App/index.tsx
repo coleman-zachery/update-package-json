@@ -19,10 +19,6 @@ import type {
 } from '@/lib/resolver'
 import { isAbortError } from '@/lib/resolver/abort'
 import {
-  coercePlatformSelection,
-  DEFAULT_PLATFORM_SELECTION,
-  getPlatformSelectorState,
-  normalizePlatformSelection,
   type PlatformSelection,
 } from '@/lib/resolver/platform-targets'
 import {
@@ -32,10 +28,12 @@ import {
   hasDependencyOverride,
   parsePackageJson,
   reformatPackageJson,
+  removeDependencyOverrides,
   removeDependenciesFromPackage,
   removeDependencyValue,
   serializePackageJson,
   setDependencyFrozen,
+  type PackageJson,
   upsertDependencyValue,
   upsertEngineValue,
   upsertNpmSupport,
@@ -55,47 +53,19 @@ import {
 } from '@/App/constants'
 import { buildApplyFixesInput } from '@/App/auditFixes'
 import { loadNpmModule, loadResolverModule } from '@/App/moduleLoaders'
+import {
+  collectPackageSemanticHighlights,
+  getOutputOverrideNames,
+} from '@/App/packageSemanticHighlights'
 import { getPreferredFrozenSection, syncRestrictions } from '@/App/restrictions'
+import { useInputPackageSemantics } from '@/App/useInputPackageSemantics'
+import { usePlatformSelection } from '@/App/usePlatformSelection'
 import { useInputValidation } from '@/App/useInputValidation'
 import { useLatestVersions } from '@/App/useLatestVersions'
 import './index.css'
 
 type PendingAction = 'update' | 'apply-fixes'
 const MAX_APPLY_FIXES_PASSES = 8
-const PLATFORM_SELECTION_STORAGE_KEY = 'upj-platform-selection'
-
-function readStoredPlatformSelection(): PlatformSelection {
-  try {
-    const raw = localStorage.getItem(PLATFORM_SELECTION_STORAGE_KEY)
-    if (!raw) {
-      return normalizePlatformSelection(DEFAULT_PLATFORM_SELECTION)
-    }
-
-    const parsed = JSON.parse(raw)
-    return normalizePlatformSelection({
-      ...DEFAULT_PLATFORM_SELECTION,
-      ...(parsed && typeof parsed === 'object' ? parsed : {}),
-    })
-  } catch {
-    return normalizePlatformSelection(DEFAULT_PLATFORM_SELECTION)
-  }
-}
-
-function writeStoredPlatformSelection(selection: PlatformSelection) {
-  try {
-    localStorage.setItem(
-      PLATFORM_SELECTION_STORAGE_KEY,
-      JSON.stringify(normalizePlatformSelection(selection)),
-    )
-  } catch {
-    // ignore storage failures
-  }
-}
-
-function getPendingForcedOverrideNames(result: ResolveResult): string[] {
-  const existingOverrideNames = new Set(Object.keys(getStringOverrides(result.updatedPackage)))
-  return result.staleDependencyNames.filter(name => !existingOverrideNames.has(name))
-}
 
 function normalizeComparableVersion(value: string | undefined): string | null {
   if (!value) {
@@ -121,10 +91,9 @@ export default function App() {
   const [pendingEngine, setPendingEngine] = useState<EngineName | null>(null)
   const [restrictions, setRestrictions] = useState<Record<string, boolean>>({})
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
-  const [forcedOverrideNames, setForcedOverrideNames] = useState<string[]>([])
+  const [overridesActive, setOverridesActive] = useState(true)
   const [majorBuildsActive, setMajorBuildsActive] = useState(true)
   const [transitivesActive, setTransitivesActive] = useState(true)
-  const [platformSelection, setPlatformSelection] = useState<PlatformSelection>(() => readStoredPlatformSelection())
   const [platformAvailableTargets, setPlatformAvailableTargets] = useState<string[]>([])
   const [dependencyExplorerRequest, setDependencyExplorerRequest] = useState<{
     id: number
@@ -140,22 +109,31 @@ export default function App() {
 
   const latestVersions = useLatestVersions()
   const inputValidation = useInputValidation(input)
+  const inputPackageSemantics = useInputPackageSemantics(input)
+  const {
+    platformSelection,
+    platformSelectorState,
+    handlePlatformSelectionChange,
+  } = usePlatformSelection(platformAvailableTargets)
 
-  const inputEngines = useMemo<Record<EngineName, string>>(() => {
+  const inputPackage = useMemo<PackageJson>(() => {
     if (!input.trim()) {
-      return { node: '', npm: '' }
+      return {}
     }
 
     try {
-      const parsed = parsePackageJson(input)
-      return {
-        node: typeof parsed?.engines?.node === 'string' ? parsed.engines.node.trim() : '',
-        npm: typeof parsed?.engines?.npm === 'string' ? parsed.engines.npm.trim() : '',
-      }
+      return parsePackageJson(input)
     } catch {
-      return { node: '', npm: '' }
+      return {}
     }
   }, [input])
+
+  const inputEngines = useMemo<Record<EngineName, string>>(() => {
+    return {
+      node: typeof inputPackage.engines?.node === 'string' ? inputPackage.engines.node.trim() : '',
+      npm: typeof inputPackage.engines?.npm === 'string' ? inputPackage.engines.npm.trim() : '',
+    }
+  }, [inputPackage])
 
   const transitiveDependencyNames = useMemo(() => {
     if (!result) {
@@ -246,25 +224,49 @@ export default function App() {
       .sort((left, right) => left.localeCompare(right))
   }, [result])
 
+  const overrideNames = useMemo(
+    () => (result ? getOutputOverrideNames(result) : []),
+    [result],
+  )
+
   const outputPackage = useMemo(() => {
     if (!result) {
       return null
     }
 
-    const packageWithForcedOverrides = forcedOverrideNames.length > 0
-      ? forceDependenciesIntoOverrides(result.updatedPackage, forcedOverrideNames)
-      : result.updatedPackage
-    const overriddenDependencyNames = new Set(Object.keys(getStringOverrides(packageWithForcedOverrides)))
+    const packageWithOverrides = overridesActive
+      ? forceDependenciesIntoOverrides(result.updatedPackage, overrideNames)
+      : removeDependencyOverrides(forceDependenciesIntoOverrides(result.updatedPackage, overrideNames), overrideNames)
+    const overriddenDependencyNames = new Set(Object.keys(getStringOverrides(packageWithOverrides)))
     const majorBuildCandidateNames = result.latestDependencyNames.filter(name => !overriddenDependencyNames.has(name))
 
     const packageWithMajorBuilds = majorBuildsActive
-      ? applyMajorBuildRanges(packageWithForcedOverrides, majorBuildCandidateNames)
-      : packageWithForcedOverrides
+      ? applyMajorBuildRanges(packageWithOverrides, majorBuildCandidateNames)
+      : packageWithOverrides
 
     return transitivesActive
       ? packageWithMajorBuilds
       : removeDependenciesFromPackage(packageWithMajorBuilds, transitiveDependencyNames)
-  }, [forcedOverrideNames, majorBuildsActive, result, transitiveDependencyNames, transitivesActive])
+  }, [majorBuildsActive, overrideNames, overridesActive, result, transitiveDependencyNames, transitivesActive])
+
+  const inputSemanticHighlights = useMemo(
+    () => collectPackageSemanticHighlights(inputPackage, {
+      transitiveDependencyNames: inputPackageSemantics.transitiveDependencyNames,
+      unresolvedDependencyNames: inputPackageSemantics.unresolvedDependencyNames,
+    }),
+    [inputPackage, inputPackageSemantics.transitiveDependencyNames, inputPackageSemantics.unresolvedDependencyNames],
+  )
+
+  const outputSemanticHighlights = useMemo(
+    () => outputPackage
+      ? collectPackageSemanticHighlights(outputPackage, {
+        overrideNames: overridesActive ? overrideNames : [],
+        result,
+        transitiveDependencyNames,
+      })
+      : collectPackageSemanticHighlights({}),
+    [outputPackage, overrideNames, overridesActive, result, transitiveDependencyNames],
+  )
 
   const outputJson = useMemo(() => {
     if (!outputPackage) {
@@ -320,7 +322,7 @@ export default function App() {
     const abortController = new AbortController()
     resolveAbortControllerRef.current = abortController
     setPendingAction(action)
-    setForcedOverrideNames([])
+    setOverridesActive(true)
     setStatus('loading')
     setResult(null)
     setErrorMsg('')
@@ -337,7 +339,7 @@ export default function App() {
         return
       }
       setPlatformAvailableTargets(nextResult.platformSupport.availableTargets)
-      setForcedOverrideNames(getPendingForcedOverrideNames(nextResult))
+      setOverridesActive(true)
       setMajorBuildsActive(true)
       setTransitivesActive(true)
       setResult(nextResult)
@@ -371,7 +373,7 @@ export default function App() {
     const abortController = new AbortController()
     resolveAbortControllerRef.current = abortController
     setPendingAction('apply-fixes')
-    setForcedOverrideNames([])
+    setOverridesActive(true)
     setStatus('loading')
     setResult(null)
     setErrorMsg('')
@@ -425,7 +427,7 @@ export default function App() {
       setInput(workingInput)
       setRestrictions(workingRestrictions)
       setPlatformAvailableTargets(workingResult.platformSupport.availableTargets)
-      setForcedOverrideNames(getPendingForcedOverrideNames(workingResult))
+      setOverridesActive(true)
       setMajorBuildsActive(true)
       setTransitivesActive(true)
       setResult(workingResult)
@@ -565,8 +567,9 @@ export default function App() {
     }
 
     try {
+      parsePackageJson(input)
       return {
-        pkg: parsePackageJson(input),
+        pkg: inputPackage,
         raw: input,
         sourceLabel: 'Input package.json',
         canApply: status !== 'loading' && pendingEngine === null,
@@ -581,7 +584,7 @@ export default function App() {
         applyDisabledReason: 'Fix the input JSON first so the new dependency has somewhere safe to land.',
       }
     }
-  }, [input, outputJson, pendingEngine, result, status])
+  }, [input, inputPackage, pendingEngine, status])
 
   const outputExplorerContext = useMemo(() => {
     if (status === 'done' && outputPackage) {
@@ -641,8 +644,8 @@ export default function App() {
     )
 
     setInput(nextInput)
-    setRestrictions(nextRestrictions)
-    setForcedOverrideNames([])
+      setRestrictions(nextRestrictions)
+    setOverridesActive(true)
     setResult(null)
     setStatus('idle')
 
@@ -654,21 +657,10 @@ export default function App() {
   }
 
   function handleForceOverrides() {
-    if (!result) {
+    if (!result || overrideNames.length === 0) {
       return
     }
-
-    if (forcedOverrideNames.length > 0) {
-      setForcedOverrideNames([])
-      return
-    }
-
-    const nextForcedOverrideNames = getPendingForcedOverrideNames(result)
-    if (nextForcedOverrideNames.length === 0) {
-      return
-    }
-
-    setForcedOverrideNames(nextForcedOverrideNames)
+    setOverridesActive(current => !current)
   }
 
   function handleMajorBuildsToggle() {
@@ -677,37 +669,6 @@ export default function App() {
 
   function handleTransitivesToggle() {
     setTransitivesActive(current => !current)
-  }
-
-  const platformSelectorState = useMemo(
-    () => getPlatformSelectorState(platformAvailableTargets, platformSelection),
-    [platformAvailableTargets, platformSelection],
-  )
-
-  useEffect(() => {
-    const nextSelection = coercePlatformSelection(platformAvailableTargets, platformSelection)
-    if (
-      nextSelection.os === platformSelection.os
-      && nextSelection.arch === platformSelection.arch
-      && nextSelection.runtime === platformSelection.runtime
-    ) {
-      return
-    }
-
-    setPlatformSelection(nextSelection)
-    writeStoredPlatformSelection(nextSelection)
-  }, [platformAvailableTargets, platformSelection])
-
-  function handlePlatformSelectionChange(
-    key: keyof PlatformSelection,
-    value: string,
-  ) {
-    const nextSelection = coercePlatformSelection(platformAvailableTargets, normalizePlatformSelection({
-      ...platformSelection,
-      [key]: value || undefined,
-    }))
-    setPlatformSelection(nextSelection)
-    writeStoredPlatformSelection(nextSelection)
   }
 
   function handleInspectDependency(packageName: string, source: 'input' | 'output') {
@@ -932,9 +893,8 @@ export default function App() {
         optionButtons={optionButtons}
         platformSelectors={{
           ...platformSelectorState,
-          selection: platformSelection,
           disabled: status === 'loading' || pendingEngine !== null,
-          onChange: (key, value) => void handlePlatformSelectionChange(key, value),
+          onChange: value => void handlePlatformSelectionChange(value),
         }}
         onEngineClick={handleEngineButton}
         onOptionClick={toggleOption}
@@ -955,11 +915,20 @@ export default function App() {
             validationSeverity={validationSeverity}
             runtimeError={errorMsg}
             markers={restrictionMarkers}
-            onInspectDependency={packageName => handleInspectDependency(packageName, 'input')}
+            readOnly={status === 'loading'}
+            overriddenDependencyNames={inputSemanticHighlights.overriddenDependencyNames}
+            platformDependencyNames={inputSemanticHighlights.platformDependencyNames}
+            transitiveDependencyNames={inputSemanticHighlights.transitiveDependencyNames}
+            unresolvedDependencyNames={inputSemanticHighlights.unresolvedDependencyNames}
+            onInspectDependency={status === 'loading'
+              ? undefined
+              : packageName => handleInspectDependency(packageName, 'input')}
           />
         </div>
         <div className="app__column">
           <ChangesPane
+            inputPackage={inputPackage}
+            displayPackage={outputPackage}
             result={result}
             status={status}
             progress={resolveProgress}
@@ -978,10 +947,15 @@ export default function App() {
           onToggleTransitives={handleTransitivesToggle}
           onUseAsInput={handleUseOutputAsInput}
           onInspectDependency={packageName => handleInspectDependency(packageName, 'output')}
-          forcedOverrideNames={forcedOverrideNames}
+          overrideNames={overrideNames}
+          overridesActive={overridesActive}
           majorBuildsActive={majorBuildsActive}
+          overriddenDependencyNames={outputSemanticHighlights.overriddenDependencyNames}
+          platformDependencyNames={outputSemanticHighlights.platformDependencyNames}
           transitiveDependencyNames={transitiveDependencyNames}
+          highlightTransitiveDependencyNames={outputSemanticHighlights.transitiveDependencyNames}
           transitivesActive={transitivesActive}
+          unresolvedDependencyNames={outputSemanticHighlights.unresolvedDependencyNames}
           spaceIndentSize={spaceIndentSize}
           status={status}
         />

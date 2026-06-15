@@ -1,5 +1,6 @@
 import { fetchPackageAuditReports, type PackageAuditReport } from '@/lib/audit'
 import { isAbortError } from './abort'
+import { collectAdditionalAuditDetails } from './audit-findings'
 import { createUnavailableAuditStatus, formatAuditFinding } from './messages'
 import { setStateVersion, syncPeerGraph } from './pass-state'
 import { stabilizeResolutionGraph } from './pass-conflicts'
@@ -49,12 +50,50 @@ function buildAuditStatus(ctx: ResolutionContext, reports: Array<{ state: Packag
     }
   }
   if (blocked.length > 0) {
-    return { state: 'failure', summary: `${blocked.length} vulnerable package${blocked.length === 1 ? '' : 's'} remain because they are frozen by current restrictions or overrides`, details: [...blocked, ...residual], warnings: residual.length, vulnerabilities: blocked.length, recommendedUnfreezeNames: Array.from(blockedNames).sort((left, right) => left.localeCompare(right)) }
+    return { state: 'failure', summary: `${blocked.length} vulnerable package${blocked.length === 1 ? '' : 's'} remain because they are frozen by current restrictions or overrides`, details: [...blocked, ...residual], warnings: residual.length, vulnerabilities: blocked.length, recommendedUnfreezeNames: Array.from(blockedNames).sort((left, right) => left.localeCompare(right)), recommendedRemovalNames: [] }
   }
   if (residual.length > 0) {
-    return { state: 'warning', summary: `${residual.length} package${residual.length === 1 ? '' : 's'} still have known advisories under the current engine or peer constraints`, details: residual, warnings: residual.length, vulnerabilities: 0, recommendedUnfreezeNames: [] }
+    return { state: 'warning', summary: `${residual.length} package${residual.length === 1 ? '' : 's'} still have known advisories under the current engine or peer constraints`, details: residual, warnings: residual.length, vulnerabilities: 0, recommendedUnfreezeNames: [], recommendedRemovalNames: [] }
   }
-  return { state: 'pass', summary: '0 vulnerabilities and 0 warnings', details: [], warnings: 0, vulnerabilities: 0, recommendedUnfreezeNames: [] }
+  return { state: 'pass', summary: '0 vulnerabilities and 0 warnings', details: [], warnings: 0, vulnerabilities: 0, recommendedUnfreezeNames: [], recommendedRemovalNames: [] }
+}
+
+function appendAdditionalDetails(
+  base: AuditStatus,
+  additional: { details: string[]; warnings: number; recommendedRemovalNames: string[] },
+): AuditStatus {
+  if (additional.details.length === 0) {
+    if (additional.recommendedRemovalNames.length === 0) {
+      return base
+    }
+    return {
+      ...base,
+      recommendedRemovalNames: additional.recommendedRemovalNames,
+    }
+  }
+
+  const details = [...base.details, ...additional.details]
+  const warnings = base.warnings + additional.warnings
+  const vulnerabilities = base.vulnerabilities
+
+  if (base.state === 'failure') {
+    return {
+      ...base,
+      details,
+      warnings,
+      recommendedRemovalNames: additional.recommendedRemovalNames,
+      summary: `${vulnerabilities} vulnerable package${vulnerabilities === 1 ? '' : 's'} and ${warnings} warning${warnings === 1 ? '' : 's'} remain`,
+    }
+  }
+
+  return {
+    ...base,
+    state: 'warning',
+    details,
+    warnings,
+    recommendedRemovalNames: additional.recommendedRemovalNames,
+    summary: `${vulnerabilities} vulnerabilities and ${warnings} warning${warnings === 1 ? '' : 's'}`,
+  }
 }
 
 export async function runAuditPass(ctx: ResolutionContext): Promise<AuditStatus> {
@@ -88,7 +127,12 @@ export async function runAuditPass(ctx: ResolutionContext): Promise<AuditStatus>
     const finalStates = Array.from(ctx.states.values()).sort((left, right) => left.name.localeCompare(right.name))
     ctx.throwIfAborted()
     await audit.prefetch(finalStates.map(state => ({ name: state.name, version: state.currentVersion })))
-    return buildAuditStatus(ctx, await Promise.all(finalStates.map(async state => ({ state, report: await audit.get(state.name, state.currentVersion) }))))
+    const reports = await Promise.all(
+      finalStates.map(async state => ({ state, report: await audit.get(state.name, state.currentVersion) })),
+    )
+    const directStatus = buildAuditStatus(ctx, reports)
+    const additional = await collectAdditionalAuditDetails(ctx, audit.get.bind(audit))
+    return appendAdditionalDetails(directStatus, additional)
   } catch (error) {
     if (isAbortError(error)) {
       throw error

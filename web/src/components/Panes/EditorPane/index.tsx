@@ -18,6 +18,11 @@ interface Props {
   runtimeError?: string
   markers?: TextareaMarker[]
   onInspectDependency?: (packageName: string) => void
+  readOnly?: boolean
+  overriddenDependencyNames?: string[]
+  platformDependencyNames?: string[]
+  transitiveDependencyNames?: string[]
+  unresolvedDependencyNames?: string[]
 }
 
 export function EditorPane({
@@ -34,11 +39,16 @@ export function EditorPane({
   runtimeError,
   markers,
   onInspectDependency,
+  readOnly = false,
+  overriddenDependencyNames = [],
+  platformDependencyNames = [],
+  transitiveDependencyNames = [],
+  unresolvedDependencyNames = [],
 }: Props) {
   const headerTitle = validationMessages.join('\n')
 
   return (
-    <div className="editor-pane">
+    <div className={`editor-pane${readOnly ? ' editor-pane--disabled' : ''}`}>
       <PaneHeader
         start={(
           <div className="editor-pane__header-main">
@@ -54,7 +64,11 @@ export function EditorPane({
                 </span>
               )}
             </div>
-            <IndentSwitch value={spaceIndentSize} onToggle={onToggleSpaceIndent} />
+            <IndentSwitch
+              value={spaceIndentSize}
+              onToggle={onToggleSpaceIndent}
+              disabled={readOnly}
+            />
           </div>
         )}
         actions={(
@@ -79,6 +93,11 @@ export function EditorPane({
         onPasteCapture={onPasteCapture}
         markers={markers}
         onInspectDependency={onInspectDependency}
+        readOnly={readOnly}
+        overriddenDependencyNames={overriddenDependencyNames}
+        platformDependencyNames={platformDependencyNames}
+        transitiveDependencyNames={transitiveDependencyNames}
+        unresolvedDependencyNames={unresolvedDependencyNames}
         ariaLabel="Input package.json"
         spaceIndentSize={spaceIndentSize}
         placeholder={`Paste your package.json here…\n\nExample:\n{\n  "dependencies": {\n    "react": "^17.0.0"\n  }\n}`}

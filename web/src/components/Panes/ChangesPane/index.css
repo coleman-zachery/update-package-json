@@ -187,6 +187,10 @@
   color: var(--warning-meta);
 }
 
+.summary-line__version-output--override {
+  color: var(--warning);
+}
+
 .summary-line__arrow {
   color: var(--text-muted);
 }

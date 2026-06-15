@@ -191,6 +191,7 @@ export async function resolveWithEngines(
     transitiveOverrides: changeSourceState.transitiveOverrides,
     transitiveOverrideWarnings: changeSourceState.transitiveOverrideWarnings,
     recommendedUnfreezeNames: Array.from(ctx.recommendedUnfreezeNames).sort((left, right) => left.localeCompare(right)),
+    recommendedRemovalNames: [],
     fixRecommendations: Array.from(ctx.fixRecommendations).sort((left, right) => left.localeCompare(right)),
     platformSupport,
   }
