@@ -68,6 +68,10 @@
   min-width: 200px;
 }
 
+.options-toggle--engine-card {
+  min-width: 260px;
+}
+
 .options-toggle--warning {
   background: var(--bg-panel-warn);
   border-color: var(--border-warn);
@@ -122,9 +126,14 @@
   border-color: var(--accent);
 }
 
+.options-toggle__meta-line {
+  display: block;
+}
+
 @media (max-width: 900px) {
   .options-toggle,
-  .options-toggle--engine {
+  .options-toggle--engine,
+  .options-toggle--engine-card {
     min-width: 0;
     flex: 1 1 220px;
   }

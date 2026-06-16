@@ -91,6 +91,84 @@ function createSourceLabel(
   return baseLabel
 }
 
+function splitSourceNames(value: string | undefined): string[] {
+  if (!value) {
+    return []
+  }
+
+  return value
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean)
+}
+
+function createPinnedSourceLabels(
+  candidates: ResolvedManifest[],
+  sourceHint?: ChangeSourceHint,
+): string[] {
+  const rootCandidates = candidates
+    .filter(candidate => candidate.root)
+    .map(candidate => candidate.name)
+
+  if (rootCandidates.length > 0) {
+    return Array.from(new Set(rootCandidates)).sort((left, right) => left.localeCompare(right))
+  }
+
+  if (sourceHint) {
+    const sources = splitSourceNames(sourceHint.source)
+    const rootSources = splitSourceNames(sourceHint.rootSource)
+
+    if (rootSources.length === 1 && sources.length === 1 && rootSources[0] !== sources[0]) {
+      return [`${rootSources[0]} via ${sources[0]}`]
+    }
+
+    const preferredSources = rootSources.length > 0 ? rootSources : sources
+    if (preferredSources.length > 0) {
+      return Array.from(new Set(preferredSources)).sort((left, right) => left.localeCompare(right))
+    }
+  }
+
+  return Array.from(new Set(
+    candidates.map(candidate => candidate.name),
+  )).sort((left, right) => left.localeCompare(right))
+}
+
+export function createPinnedBelowLatestReason(
+  name: string,
+  resolvedVersion: string | null | undefined,
+  latestVersion: string | undefined,
+  manifests: ResolvedManifest[],
+  sourceHint?: ChangeSourceHint,
+): string | undefined {
+  if (!resolvedVersion || !latestVersion || !semver.valid(resolvedVersion) || !semver.valid(latestVersion)) {
+    return undefined
+  }
+
+  if (!semver.lt(resolvedVersion, latestVersion)) {
+    return undefined
+  }
+
+  const candidates = manifests.filter(manifest => {
+    if (manifest.name === name) {
+      return false
+    }
+
+    const requiredRange = getConstraintRange(manifest.manifest, name)
+    return Boolean(
+      requiredRange
+      && semver.satisfies(resolvedVersion, requiredRange)
+      && !semver.satisfies(latestVersion, requiredRange),
+    )
+  })
+
+  const viaLabels = createPinnedSourceLabels(candidates, sourceHint)
+  if (viaLabels.length === 0) {
+    return undefined
+  }
+
+  return `pinned below latest ${latestVersion} via ${viaLabels.join(', ')}`
+}
+
 function findDowngradeReason(
   change: VersionChange,
   manifests: ResolvedManifest[],
@@ -155,6 +233,17 @@ function getDisplayedVersion(
     ?? change.to
 }
 
+function getOutputResolvedVersion(
+  change: VersionChange,
+  displayPackage: PackageJson | null,
+): string | null {
+  if (!displayPackage) {
+    return null
+  }
+
+  return normalizeVersion(getDisplayedVersion(change, displayPackage))
+}
+
 export function createVersionChangeEntry(
   change: VersionChange,
   manifests: ResolvedManifest[],
@@ -170,17 +259,30 @@ export function createVersionChangeEntry(
   const resolvedManifest = manifestsByName.get(change.name)
   const sourceHint = sourceHintsByName.get(change.name)
   const finalVersion = normalizeVersion(change.to)
+  const outputResolvedVersion = getOutputResolvedVersion(change, displayPackage)
+  const pinnedReason = createPinnedBelowLatestReason(
+    change.name,
+    outputResolvedVersion,
+    resolvedManifest?.latestVersion,
+    manifests,
+    sourceHint,
+  )
   const isLatestStable = Boolean(
     finalVersion
     && resolvedManifest?.latestVersion
-    && finalVersion === resolvedManifest.latestVersion,
+    && semver.valid(resolvedManifest.latestVersion)
+    && !semver.lt(finalVersion, resolvedManifest.latestVersion),
   )
-  const outputTone = isLatestStable ? 'upgrade' : 'downgrade'
+  const outputTone = pinnedReason ? 'downgrade' : isLatestStable ? 'upgrade' : 'downgrade'
   const reason = direction === 'added'
-    ? (sourceHint ? createSourceLabel(sourceHint, manifestsByName, change.to) : undefined)
-    : outputTone === 'downgrade'
+    ? (
+        pinnedReason
+        ?? (sourceHint ? createSourceLabel(sourceHint, manifestsByName, change.to) : undefined)
+      )
+    : pinnedReason
+      ?? (outputTone === 'downgrade'
       ? findDowngradeReason(change, manifests, manifestsByName, resolvedManifest?.latestVersion, sourceHint)
-      : undefined
+      : undefined)
 
   return {
     name: change.name,

@@ -1,9 +1,8 @@
-import { useEffect, useState, type ReactElement } from 'react'
-import Box from '@mui/material/Box'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import ListSubheader from '@mui/material/ListSubheader'
+import Menu from '@mui/material/Menu'
 import MenuItem from '@mui/material/MenuItem'
-import Select, { type SelectChangeEvent } from '@mui/material/Select'
-import Typography from '@mui/material/Typography'
+import { OptionToggle } from './OptionToggle'
 import type { PlatformOption } from '@/lib/resolver/platform-targets'
 import './platform.css'
 
@@ -15,57 +14,21 @@ interface Props {
   onChange: (value: string) => void
 }
 
-const selectSx = (showClearButton: boolean) => ({
-  width: '100%',
-  backgroundColor: 'color-mix(in srgb, var(--accent) 6%, transparent)',
-  borderRadius: '10px',
-  color: 'var(--options-bar-platform-accent)',
-  '& .MuiOutlinedInput-notchedOutline': {
-    borderColor: '#6f647f',
-  },
-  '&:hover .MuiOutlinedInput-notchedOutline': {
-    borderColor: '#83779a',
-  },
-  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-    borderColor: 'var(--accent)',
-    borderWidth: '1px',
-  },
-  '& .MuiSelect-select': {
-    display: 'flex',
-    alignItems: 'center',
-    minHeight: 'unset',
-    paddingBlock: '10px',
-    paddingRight: `${showClearButton ? 68 : 36}px !important`,
-    fontSize: '0.82rem',
-    lineHeight: 1.35,
-  },
-  '& .MuiSvgIcon-root': {
-    color: 'var(--options-bar-platform-hint-selected)',
-  },
-  '&.Mui-disabled': {
-    opacity: 0.55,
-  },
-}) as const
-
-function renderPlatformValue(option?: PlatformOption, variant: 'menu' | 'selected' = 'menu') {
+function renderPlatformValue(option?: PlatformOption) {
   if (!option) {
     return <span className="options-bar__platform-none">None</span>
   }
 
-  const text = variant === 'selected' ? (option.selectedLabel ?? option.label) : option.label
-  const hint = variant === 'menu' ? option.hint : undefined
-  const hintDetail = variant === 'menu' ? option.hintDetail : undefined
-
   return (
-    <span className={`options-bar__platform-value options-bar__platform-value--${variant}`}>
-      <span className={`options-bar__platform-text options-bar__platform-text--${variant}`}>
-        {text}
+    <span className="options-bar__platform-value options-bar__platform-value--menu">
+      <span className="options-bar__platform-text options-bar__platform-text--menu">
+        {option.label}
       </span>
-      {hint ? (
-        <span className={`options-bar__platform-hint options-bar__platform-hint--${variant}`}>
-          {hint}
-          {hintDetail ? (
-            <span className="options-bar__platform-hint-detail">{hintDetail}</span>
+      {option.hint ? (
+        <span className="options-bar__platform-hint options-bar__platform-hint--menu">
+          {option.hint}
+          {option.hintDetail ? (
+            <span className="options-bar__platform-hint-detail">{option.hintDetail}</span>
           ) : null}
         </span>
       ) : null}
@@ -80,6 +43,8 @@ export function PlatformSelectField({
   disabled,
   onChange,
 }: Props) {
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const menuPaperRef = useRef<HTMLDivElement | null>(null)
   const selectedOption = options.find(option => option.value === value)
   const showClearButton = Boolean(value) && !disabled
   const [open, setOpen] = useState(false)
@@ -90,9 +55,41 @@ export function PlatformSelectField({
     }
   }, [disabled])
 
-  function handleChange(event: SelectChangeEvent<string>) {
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target
+      if (!(target instanceof Node)) {
+        return
+      }
+
+      if (buttonRef.current?.contains(target) || menuPaperRef.current?.contains(target)) {
+        return
+      }
+
+      setOpen(false)
+    }
+
+    document.addEventListener('mousedown', handlePointerDown, true)
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown, true)
+    }
+  }, [open])
+
+  function handleToggle() {
+    if (disabled) {
+      return
+    }
+
+    setOpen(current => !current)
+  }
+
+  function handleSelect(nextValue: string) {
     setOpen(false)
-    onChange(event.target.value)
+    onChange(nextValue)
   }
 
   function handleClear() {
@@ -122,9 +119,17 @@ export function PlatformSelectField({
           key={option.value}
           value={option.value}
           className="options-bar__platform-option"
-          onClick={option.value === value ? handleClear : undefined}
+          selected={option.value === value}
+          onClick={() => {
+            if (option.value === value) {
+              handleClear()
+              return
+            }
+
+            handleSelect(option.value)
+          }}
         >
-          {renderPlatformValue(option, 'menu')}
+          {renderPlatformValue(option)}
         </MenuItem>,
       )
     }
@@ -133,65 +138,83 @@ export function PlatformSelectField({
   }
 
   return (
-    <Box className={`options-bar__platform-field${disabled ? ' options-bar__platform-field--disabled' : ''}`}>
-      <Typography component="span" className="options-bar__platform-label">
-        {label}
-      </Typography>
+    <div className={`options-bar__platform-field${selectedOption ? ' options-bar__platform-field--active' : ''}${open ? ' options-bar__platform-field--open' : ''}`}>
       <div className="options-bar__platform-input">
-        {showClearButton ? (
-          <button
-            type="button"
-            className="options-bar__platform-clear"
-            onMouseDown={event => {
-              event.preventDefault()
-              event.stopPropagation()
-            }}
-            onClick={event => {
-              event.preventDefault()
-              event.stopPropagation()
-              handleClear()
-            }}
-            aria-label={`Clear ${label.toLowerCase()} selection`}
-          >
-            ⮾
-          </button>
-        ) : null}
-        <Select
-          size="small"
-          value={value}
-          onChange={handleChange}
-          open={open}
-          onOpen={() => setOpen(true)}
-          onClose={() => setOpen(false)}
+        <OptionToggle
+          buttonRef={buttonRef}
+          className=" options-toggle--platform"
+          active={Boolean(selectedOption)}
           disabled={disabled}
-          displayEmpty
-          MenuProps={{
-            anchorOrigin: {
-              vertical: 'bottom',
-              horizontal: 'left',
-            },
-            transformOrigin: {
-              vertical: 'top',
-              horizontal: 'left',
-            },
-            slotProps: {
-              paper: {
-                className: 'options-bar__platform-menu-paper',
-                sx: {
-                  maxHeight: '24rem',
-                },
+          ariaPressed={Boolean(selectedOption)}
+          ariaExpanded={open}
+          ariaHasPopup="menu"
+          onClick={handleToggle}
+          label={label}
+          meta={selectedOption?.selectedLabel ?? 'N/A'}
+        />
+
+        <div className="options-bar__platform-actions">
+          {showClearButton ? (
+            <button
+              type="button"
+              className="options-bar__platform-clear"
+              onMouseDown={event => {
+                event.preventDefault()
+                event.stopPropagation()
+              }}
+              onClick={event => {
+                event.preventDefault()
+                event.stopPropagation()
+                handleClear()
+              }}
+              aria-label={`Clear ${label.toLowerCase()} selection`}
+            >
+              ×
+            </button>
+          ) : (
+            <span className="options-bar__platform-clear-spacer" aria-hidden="true" />
+          )}
+
+          <span className="options-bar__platform-caret" aria-hidden="true">
+            ▾
+          </span>
+        </div>
+
+        <Menu
+          anchorEl={buttonRef.current}
+          open={open}
+          onClose={() => setOpen(false)}
+          hideBackdrop
+          anchorOrigin={{
+            vertical: 'bottom',
+            horizontal: 'left',
+          }}
+          transformOrigin={{
+            vertical: 'top',
+            horizontal: 'left',
+          }}
+          slotProps={{
+            root: {
+              sx: {
+                pointerEvents: 'none',
               },
-              list: {
-                className: 'options-bar__platform-menu-list',
+            },
+            paper: {
+              ref: menuPaperRef,
+              className: 'options-bar__platform-menu-paper',
+              sx: {
+                maxHeight: '24rem',
+                pointerEvents: 'auto',
               },
+            },
+            list: {
+              className: 'options-bar__platform-menu-list',
             },
           }}
-          sx={selectSx(showClearButton)}
-          renderValue={() => renderPlatformValue(selectedOption, 'selected')}
         >
           {renderMenuItems()}
-        </Select>
+        </Menu>
       </div>
-    </Box>
+    </div>
   )
 }

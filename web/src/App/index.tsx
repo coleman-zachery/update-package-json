@@ -2,7 +2,7 @@ import semver from 'semver'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppHeader } from '@/components/AppHeader'
 import { DependencyExplorer } from '@/components/DependencyExplorer'
-import { OptionsBar, type EngineControlButton, type OptionControlButton } from '@/components/OptionsBar'
+import { OptionsBar, type EngineControlCard, type OptionControlButton } from '@/components/OptionsBar'
 import { ChangesPane } from '@/components/Panes/ChangesPane'
 import { EditorPane } from '@/components/Panes/EditorPane'
 import { OutputPane } from '@/components/Panes/OutputPane'
@@ -757,63 +757,65 @@ export default function App() {
   const engineControlsDisabled =
     status === 'loading' || pendingEngine !== null || inputValidation.errors.length > 0
 
-  const engineButtons = useMemo<EngineControlButton[]>(() => {
-    return ENGINE_NAMES.map(engineName => {
+  const engineCard = useMemo<EngineControlCard>(() => {
+    const segments = ENGINE_NAMES.map(engineName => {
       const currentValue = inputEngines[engineName]
       const latest = formatLatestVersion(engineName)
       const engineIssueMeta = formatEngineButtonIssue(engineName)
       const frozen = isEngineFrozen(engineName)
+      const label = engineName === 'node' ? 'node' : 'npm'
 
       if (pendingEngine === engineName) {
         return {
-          engineName,
-          label: `engines.${engineName}`,
-          active: false,
-          warning: false,
-          danger: false,
-          hasInput: false,
-          meta: `adding latest ${latest}`,
-          disabled: engineControlsDisabled,
+          status: `${label} adding ${latest}`,
+          present: false,
+          frozen: false,
+          invalid: false,
         }
       }
 
       if (!currentValue) {
         return {
-          engineName,
-          label: `engines.${engineName}`,
-          active: false,
-          warning: false,
-          danger: false,
-          hasInput: false,
-          meta: `add latest ${latest}`,
-          disabled: engineControlsDisabled,
+          status: `${label} add ${latest}`,
+          present: false,
+          frozen: false,
+          invalid: false,
         }
       }
 
       if (engineIssueMeta) {
         return {
-          engineName,
-          label: `engines.${engineName}`,
-          active: false,
-          warning: false,
-          danger: true,
-          hasInput: true,
-          meta: engineIssueMeta,
-          disabled: engineControlsDisabled,
+          status: engineIssueMeta
+            .replace(`engines.${engineName} `, `${label} `)
+            .replace(` doesn't match any published ${engineName === 'node' ? 'Node.js' : 'npm'} version`, ' has no published match')
+            .replace(` isn't a valid semver range`, ' has an invalid range'),
+          present: true,
+          frozen: false,
+          invalid: true,
         }
       }
 
       return {
-        engineName,
-        label: `engines.${engineName}`,
-        active: !frozen,
-        warning: frozen,
-        danger: false,
-        hasInput: true,
-        meta: frozen ? `using override ${currentValue}` : `using latest ${latest}`,
-        disabled: engineControlsDisabled,
+        status: frozen ? `${label} override ${currentValue}` : `${label} latest ${latest}`,
+        present: true,
+        frozen,
+        invalid: false,
       }
     })
+    const hasInvalid = segments.some(segment => segment.invalid)
+    const allPresent = segments.every(segment => segment.present)
+    const anyFrozen = segments.some(segment => segment.frozen)
+    const allFrozen = segments.every(segment => segment.frozen)
+
+    return {
+      label: 'Engines',
+      active: allPresent && !hasInvalid && !anyFrozen,
+      warning: !hasInvalid && allPresent && anyFrozen,
+      danger: hasInvalid,
+      meta: segments.map(segment => segment.status).join(' • '),
+      disabled: engineControlsDisabled,
+      pressed: allPresent && !hasInvalid ? !allFrozen : undefined,
+    }
   }, [engineControlsDisabled, inputEngines, latestVersions, pendingEngine, restrictions, inputValidation.engineIssues])
 
   const optionButtons = useMemo<OptionControlButton[]>(() => {
@@ -859,17 +861,24 @@ export default function App() {
     })
   }, [input, errorMsg, restrictableEntries, restrictions, spaceIndentSize])
 
-  function handleEngineButton(engineName: EngineName) {
-    if (!inputEngines[engineName]) {
-      void handleAddEngine(engineName)
+  async function handleEngineCard() {
+    const invalidEngineNames = ENGINE_NAMES.filter(engineName => Boolean(getEngineIssue(engineName)))
+    if (invalidEngineNames.length > 0) {
       return
     }
 
-    if (getEngineIssue(engineName)) {
+    const missingEngineNames = ENGINE_NAMES.filter(engineName => !inputEngines[engineName])
+    if (missingEngineNames.length > 0) {
+      for (const engineName of missingEngineNames) {
+        await handleAddEngine(engineName)
+      }
       return
     }
 
-    setEngineFrozen(engineName, !isEngineFrozen(engineName))
+    const shouldFreeze = !ENGINE_NAMES.every(engineName => isEngineFrozen(engineName))
+    for (const engineName of ENGINE_NAMES) {
+      setEngineFrozen(engineName, shouldFreeze)
+    }
   }
 
   return (
@@ -889,14 +898,14 @@ export default function App() {
       />
 
       <OptionsBar
-        engineButtons={engineButtons}
+        engineCard={engineCard}
         optionButtons={optionButtons}
         platformSelectors={{
           ...platformSelectorState,
           disabled: status === 'loading' || pendingEngine !== null,
           onChange: value => void handlePlatformSelectionChange(value),
         }}
-        onEngineClick={handleEngineButton}
+        onEngineClick={() => void handleEngineCard()}
         onOptionClick={toggleOption}
       />
 

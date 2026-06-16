@@ -1,23 +1,23 @@
-import type { EngineName, ResolveOptions } from '@/lib/resolver'
+import type { ReactNode } from 'react'
+import type { ResolveOptions } from '@/lib/resolver'
 import type { PlatformOption } from '@/lib/resolver/platform-targets'
 
-export interface EngineControlButton {
-  engineName: EngineName
-  label: string
+export interface EngineControlCard {
+  label: ReactNode
   active: boolean
   warning: boolean
   danger: boolean
-  hasInput: boolean
-  meta: string
+  meta: ReactNode
   disabled: boolean
+  pressed?: boolean
 }
 
 export interface OptionControlButton {
   key: keyof ResolveOptions
-  label: string
+  label: ReactNode
   active: boolean
   warning: boolean
-  meta: string
+  meta: ReactNode
   disabled: boolean
   pressed: boolean
 }

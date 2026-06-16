@@ -3,29 +3,46 @@ import {
   getStringOverrides,
   type PackageJson,
 } from '@/lib/package-json'
-import type { ResolvedManifest } from '@/lib/resolver'
+import type {
+  ChangeSourceHint,
+  ResolvedManifest,
+} from '@/lib/resolver'
 import type { VersionChangeEntry } from './index'
-import { normalizeVersion } from './helpers'
+import {
+  createPinnedBelowLatestReason,
+  normalizeVersion,
+} from './helpers'
 
 function createOverridePinReason(
   name: string,
   overrideVersion: string,
+  manifests: ResolvedManifest[],
   manifestsByName: Map<string, ResolvedManifest>,
+  sourceHint?: ChangeSourceHint,
 ): string {
   const latestVersion = manifestsByName.get(name)?.latestVersion
   const normalizedOverrideVersion = normalizeVersion(overrideVersion)
+  const pinnedReason = createPinnedBelowLatestReason(
+    name,
+    normalizedOverrideVersion,
+    latestVersion,
+    manifests,
+    sourceHint,
+  )
 
-  if (latestVersion && normalizedOverrideVersion && latestVersion !== normalizedOverrideVersion) {
-    return `pinned in overrides to keep ${overrideVersion} instead of floating to ${latestVersion}`
+  if (pinnedReason) {
+    return pinnedReason
   }
 
-  return `pinned in overrides to keep ${overrideVersion}`
+  return `pinned in overrides to ${overrideVersion}`
 }
 
 export function createVersionChangeOverridesSummary(
   inputPackage: PackageJson,
   displayPackage: PackageJson | null,
+  manifests: ResolvedManifest[],
   manifestsByName: Map<string, ResolvedManifest>,
+  sourceHintsByName: Map<string, ChangeSourceHint>,
 ): VersionChangeEntry[] {
   if (!displayPackage) {
     return []
@@ -52,7 +69,13 @@ export function createVersionChangeOverridesSummary(
       displayTo: overrideVersion,
       direction: 'added',
       isPlatform: false,
-      reason: createOverridePinReason(name, overrideVersion, manifestsByName),
+      reason: createOverridePinReason(
+        name,
+        overrideVersion,
+        manifests,
+        manifestsByName,
+        sourceHintsByName.get(name),
+      ),
       outputTone: 'override',
     })
   }

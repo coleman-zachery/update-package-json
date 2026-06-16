@@ -60,7 +60,9 @@ export function createChangeSummary(
   const overrideSummaries = createVersionChangeOverridesSummary(
     options.inputPackage ?? {},
     options.displayPackage ?? null,
+    result.resolvedManifests,
     manifestsByName,
+    sourceHintsByName,
   )
 
   for (const overrideSummary of overrideSummaries) {
