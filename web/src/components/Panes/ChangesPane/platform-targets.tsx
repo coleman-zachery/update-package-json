@@ -26,7 +26,8 @@ export function PlatformTargetsSection({ platformSupport }: Props) {
       <h3>Platform optional dependencies</h3>
       <p className="audit-summary__meta">
         Native optional dependency families were detected. The global platform selectors in the
-        toolbar determine which family member should be carried into the output package.json.
+        toolbar determine which family member should be carried into the output package.json. If
+        the selector is left at <em>None</em>, platform-specific additions are skipped.
       </p>
       {platformSupport.selectedTargets.length > 0 ? (
         <p className="platform-targets__hint">

@@ -1,7 +1,8 @@
+import semver from 'semver'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppHeader } from '@/components/AppHeader'
 import { DependencyExplorer } from '@/components/DependencyExplorer'
-import { OptionsBar, type EngineControlButton, type OptionControlButton } from '@/components/OptionsBar'
+import { OptionsBar, type EngineControlCard, type OptionControlButton } from '@/components/OptionsBar'
 import { ChangesPane } from '@/components/Panes/ChangesPane'
 import { EditorPane } from '@/components/Panes/EditorPane'
 import { OutputPane } from '@/components/Panes/OutputPane'
@@ -16,11 +17,8 @@ import type {
   ResolveOptions,
   ResolveResult,
 } from '@/lib/resolver'
+import { isAbortError } from '@/lib/resolver/abort'
 import {
-  coercePlatformSelection,
-  DEFAULT_PLATFORM_SELECTION,
-  getPlatformSelectorState,
-  normalizePlatformSelection,
   type PlatformSelection,
 } from '@/lib/resolver/platform-targets'
 import {
@@ -30,8 +28,12 @@ import {
   hasDependencyOverride,
   parsePackageJson,
   reformatPackageJson,
+  removeDependencyOverrides,
+  removeDependenciesFromPackage,
+  removeDependencyValue,
   serializePackageJson,
   setDependencyFrozen,
+  type PackageJson,
   upsertDependencyValue,
   upsertEngineValue,
   upsertNpmSupport,
@@ -51,47 +53,31 @@ import {
 } from '@/App/constants'
 import { buildApplyFixesInput } from '@/App/auditFixes'
 import { loadNpmModule, loadResolverModule } from '@/App/moduleLoaders'
+import {
+  collectPackageSemanticHighlights,
+  getOutputOverrideNames,
+} from '@/App/packageSemanticHighlights'
 import { getPreferredFrozenSection, syncRestrictions } from '@/App/restrictions'
+import { useInputPackageSemantics } from '@/App/useInputPackageSemantics'
+import { usePlatformSelection } from '@/App/usePlatformSelection'
 import { useInputValidation } from '@/App/useInputValidation'
 import { useLatestVersions } from '@/App/useLatestVersions'
 import './index.css'
 
 type PendingAction = 'update' | 'apply-fixes'
 const MAX_APPLY_FIXES_PASSES = 8
-const PLATFORM_SELECTION_STORAGE_KEY = 'upj-platform-selection'
-const PLATFORM_SELECTION_RESOLVE_DEBOUNCE_MS = 220
 
-function readStoredPlatformSelection(): PlatformSelection {
-  try {
-    const raw = localStorage.getItem(PLATFORM_SELECTION_STORAGE_KEY)
-    if (!raw) {
-      return normalizePlatformSelection(DEFAULT_PLATFORM_SELECTION)
-    }
-
-    const parsed = JSON.parse(raw)
-    return normalizePlatformSelection({
-      ...DEFAULT_PLATFORM_SELECTION,
-      ...(parsed && typeof parsed === 'object' ? parsed : {}),
-    })
-  } catch {
-    return normalizePlatformSelection(DEFAULT_PLATFORM_SELECTION)
+function normalizeComparableVersion(value: string | undefined): string | null {
+  if (!value) {
+    return null
   }
-}
 
-function writeStoredPlatformSelection(selection: PlatformSelection) {
-  try {
-    localStorage.setItem(
-      PLATFORM_SELECTION_STORAGE_KEY,
-      JSON.stringify(normalizePlatformSelection(selection)),
-    )
-  } catch {
-    // ignore storage failures
+  const normalized = value.replace(/^[\^~]/, '').trim()
+  if (semver.valid(normalized)) {
+    return normalized
   }
-}
 
-function getPendingForcedOverrideNames(result: ResolveResult): string[] {
-  const existingOverrideNames = new Set(Object.keys(getStringOverrides(result.updatedPackage)))
-  return result.staleDependencyNames.filter(name => !existingOverrideNames.has(name))
+  return semver.minVersion(value)?.version ?? null
 }
 
 export default function App() {
@@ -105,9 +91,9 @@ export default function App() {
   const [pendingEngine, setPendingEngine] = useState<EngineName | null>(null)
   const [restrictions, setRestrictions] = useState<Record<string, boolean>>({})
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
-  const [forcedOverrideNames, setForcedOverrideNames] = useState<string[]>([])
+  const [overridesActive, setOverridesActive] = useState(true)
   const [majorBuildsActive, setMajorBuildsActive] = useState(true)
-  const [platformSelection, setPlatformSelection] = useState<PlatformSelection>(() => readStoredPlatformSelection())
+  const [transitivesActive, setTransitivesActive] = useState(true)
   const [platformAvailableTargets, setPlatformAvailableTargets] = useState<string[]>([])
   const [dependencyExplorerRequest, setDependencyExplorerRequest] = useState<{
     id: number
@@ -119,42 +105,168 @@ export default function App() {
   } | null>(null)
   const pendingIndentAutoDetectRef = useRef(false)
   const dependencyExplorerRequestIdRef = useRef(0)
-  const platformSelectionResolveTimeoutRef = useRef<number | null>(null)
+  const resolveAbortControllerRef = useRef<AbortController | null>(null)
 
   const latestVersions = useLatestVersions()
   const inputValidation = useInputValidation(input)
+  const inputPackageSemantics = useInputPackageSemantics(input)
+  const {
+    platformSelection,
+    platformSelectorState,
+    handlePlatformSelectionChange,
+  } = usePlatformSelection(platformAvailableTargets)
 
-  const inputEngines = useMemo<Record<EngineName, string>>(() => {
+  const inputPackage = useMemo<PackageJson>(() => {
     if (!input.trim()) {
-      return { node: '', npm: '' }
+      return {}
     }
 
     try {
-      const parsed = parsePackageJson(input)
-      return {
-        node: typeof parsed?.engines?.node === 'string' ? parsed.engines.node.trim() : '',
-        npm: typeof parsed?.engines?.npm === 'string' ? parsed.engines.npm.trim() : '',
-      }
+      return parsePackageJson(input)
     } catch {
-      return { node: '', npm: '' }
+      return {}
     }
   }, [input])
+
+  const inputEngines = useMemo<Record<EngineName, string>>(() => {
+    return {
+      node: typeof inputPackage.engines?.node === 'string' ? inputPackage.engines.node.trim() : '',
+      npm: typeof inputPackage.engines?.npm === 'string' ? inputPackage.engines.npm.trim() : '',
+    }
+  }, [inputPackage])
+
+  const transitiveDependencyNames = useMemo(() => {
+    if (!result) {
+      return []
+    }
+
+    const rootPackageNames = [
+      ...new Set([
+        ...Object.keys(result.updatedPackage.dependencies ?? {}),
+        ...Object.keys(result.updatedPackage.devDependencies ?? {}),
+        ...Object.keys(result.updatedPackage.peerDependencies ?? {}),
+        ...Object.keys(result.updatedPackage.optionalDependencies ?? {}),
+      ]),
+    ]
+    if (rootPackageNames.length === 0) {
+      return []
+    }
+
+    const rootPackageNameSet = new Set(rootPackageNames)
+    const manifestsByName = new Map(result.resolvedManifests.map(manifest => [manifest.name, manifest]))
+    const protectedNames = new Set([
+      ...result.changeSources
+        .filter(source => source.kind === 'platform' || source.kind === 'peer')
+        .map(source => source.name),
+      ...Object.keys(result.updatedPackage.peerDependencies ?? {}),
+      ...Object.keys(result.updatedPackage.optionalDependencies ?? {}),
+    ])
+    const adjacency = new Map<string, string[]>()
+
+    for (const sourceName of rootPackageNames) {
+      const sourceManifest = manifestsByName.get(sourceName)?.manifest
+      if (!sourceManifest) {
+        adjacency.set(sourceName, [])
+        continue
+      }
+
+      const dependencyTargets = new Set<string>()
+      for (const [dependencyName, dependencyRange] of Object.entries(sourceManifest.dependencies ?? {})) {
+        if (!rootPackageNameSet.has(dependencyName) || !semver.validRange(dependencyRange)) {
+          continue
+        }
+
+        const resolvedVersion = manifestsByName.get(dependencyName)?.version
+          ?? result.updatedPackage.dependencies?.[dependencyName]
+          ?? result.updatedPackage.devDependencies?.[dependencyName]
+          ?? result.updatedPackage.peerDependencies?.[dependencyName]
+          ?? result.updatedPackage.optionalDependencies?.[dependencyName]
+        const normalizedResolvedVersion = normalizeComparableVersion(resolvedVersion)
+        if (!normalizedResolvedVersion || !semver.satisfies(normalizedResolvedVersion, dependencyRange)) {
+          continue
+        }
+
+        dependencyTargets.add(dependencyName)
+      }
+
+      adjacency.set(sourceName, Array.from(dependencyTargets))
+    }
+
+    const transitivelyReducibleRoots = rootPackageNames.filter(name => !protectedNames.has(name))
+    const reachableNames = new Set<string>()
+    for (const rootName of transitivelyReducibleRoots) {
+      const pendingTargets = [...(adjacency.get(rootName) ?? [])]
+      const seenTargets = new Set<string>()
+
+      while (pendingTargets.length > 0) {
+        const targetName = pendingTargets.pop()
+        if (!targetName || targetName === rootName || seenTargets.has(targetName)) {
+          continue
+        }
+
+        seenTargets.add(targetName)
+        reachableNames.add(targetName)
+
+        if (protectedNames.has(targetName)) {
+          continue
+        }
+
+        for (const nextTarget of adjacency.get(targetName) ?? []) {
+          if (!seenTargets.has(nextTarget)) {
+            pendingTargets.push(nextTarget)
+          }
+        }
+      }
+    }
+
+    return rootPackageNames
+      .filter(name => reachableNames.has(name) && !protectedNames.has(name))
+      .sort((left, right) => left.localeCompare(right))
+  }, [result])
+
+  const overrideNames = useMemo(
+    () => (result ? getOutputOverrideNames(result) : []),
+    [result],
+  )
 
   const outputPackage = useMemo(() => {
     if (!result) {
       return null
     }
 
-    const packageWithForcedOverrides = forcedOverrideNames.length > 0
-      ? forceDependenciesIntoOverrides(result.updatedPackage, forcedOverrideNames)
-      : result.updatedPackage
-    const overriddenDependencyNames = new Set(Object.keys(getStringOverrides(packageWithForcedOverrides)))
+    const packageWithOverrides = overridesActive
+      ? forceDependenciesIntoOverrides(result.updatedPackage, overrideNames)
+      : removeDependencyOverrides(forceDependenciesIntoOverrides(result.updatedPackage, overrideNames), overrideNames)
+    const overriddenDependencyNames = new Set(Object.keys(getStringOverrides(packageWithOverrides)))
     const majorBuildCandidateNames = result.latestDependencyNames.filter(name => !overriddenDependencyNames.has(name))
 
-    return majorBuildsActive
-      ? applyMajorBuildRanges(packageWithForcedOverrides, majorBuildCandidateNames)
-      : packageWithForcedOverrides
-  }, [forcedOverrideNames, majorBuildsActive, result])
+    const packageWithMajorBuilds = majorBuildsActive
+      ? applyMajorBuildRanges(packageWithOverrides, majorBuildCandidateNames)
+      : packageWithOverrides
+
+    return transitivesActive
+      ? packageWithMajorBuilds
+      : removeDependenciesFromPackage(packageWithMajorBuilds, transitiveDependencyNames)
+  }, [majorBuildsActive, overrideNames, overridesActive, result, transitiveDependencyNames, transitivesActive])
+
+  const inputSemanticHighlights = useMemo(
+    () => collectPackageSemanticHighlights(inputPackage, {
+      transitiveDependencyNames: inputPackageSemantics.transitiveDependencyNames,
+      unresolvedDependencyNames: inputPackageSemantics.unresolvedDependencyNames,
+    }),
+    [inputPackage, inputPackageSemantics.transitiveDependencyNames, inputPackageSemantics.unresolvedDependencyNames],
+  )
+
+  const outputSemanticHighlights = useMemo(
+    () => outputPackage
+      ? collectPackageSemanticHighlights(outputPackage, {
+        overrideNames: overridesActive ? overrideNames : [],
+        result,
+        transitiveDependencyNames,
+      })
+      : collectPackageSemanticHighlights({}),
+    [outputPackage, overrideNames, overridesActive, result, transitiveDependencyNames],
+  )
 
   const outputJson = useMemo(() => {
     if (!outputPackage) {
@@ -196,9 +308,7 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      if (platformSelectionResolveTimeoutRef.current !== null) {
-        window.clearTimeout(platformSelectionResolveTimeoutRef.current)
-      }
+      resolveAbortControllerRef.current?.abort()
     }
   }, [])
 
@@ -208,13 +318,11 @@ export default function App() {
     action: PendingAction,
     nextPlatformSelection: PlatformSelection = platformSelection,
   ) {
-    if (platformSelectionResolveTimeoutRef.current !== null) {
-      window.clearTimeout(platformSelectionResolveTimeoutRef.current)
-      platformSelectionResolveTimeoutRef.current = null
-    }
-
+    resolveAbortControllerRef.current?.abort()
+    const abortController = new AbortController()
+    resolveAbortControllerRef.current = abortController
     setPendingAction(action)
-    setForcedOverrideNames([])
+    setOverridesActive(true)
     setStatus('loading')
     setResult(null)
     setErrorMsg('')
@@ -225,17 +333,30 @@ export default function App() {
       const nextResult = await resolvePackageJson(nextInput, options, nextRestrictions, {
         platformSelection: nextPlatformSelection,
         onProgress: setResolveProgress,
+        signal: abortController.signal,
       })
+      if (abortController.signal.aborted) {
+        return
+      }
       setPlatformAvailableTargets(nextResult.platformSupport.availableTargets)
-      setForcedOverrideNames(getPendingForcedOverrideNames(nextResult))
+      setOverridesActive(true)
       setMajorBuildsActive(true)
+      setTransitivesActive(true)
       setResult(nextResult)
       setStatus('done')
     } catch (error) {
+      if (isAbortError(error)) {
+        setStatus('idle')
+        setResolveProgress(null)
+        return
+      }
       setErrorMsg(error instanceof Error ? error.message : String(error))
       setStatus('error')
     } finally {
-      setPendingAction(null)
+      if (resolveAbortControllerRef.current === abortController) {
+        resolveAbortControllerRef.current = null
+      }
+      setPendingAction(current => current === action ? null : current)
     }
   }
 
@@ -248,8 +369,11 @@ export default function App() {
       return
     }
 
+    resolveAbortControllerRef.current?.abort()
+    const abortController = new AbortController()
+    resolveAbortControllerRef.current = abortController
     setPendingAction('apply-fixes')
-    setForcedOverrideNames([])
+    setOverridesActive(true)
     setStatus('loading')
     setResult(null)
     setErrorMsg('')
@@ -290,22 +414,42 @@ export default function App() {
         workingResult = await resolvePackageJson(workingInput, options, workingRestrictions, {
           platformSelection,
           onProgress: setResolveProgress,
+          signal: abortController.signal,
         })
+        if (abortController.signal.aborted) {
+          return
+        }
       }
 
+      if (abortController.signal.aborted) {
+        return
+      }
       setInput(workingInput)
       setRestrictions(workingRestrictions)
       setPlatformAvailableTargets(workingResult.platformSupport.availableTargets)
-      setForcedOverrideNames(getPendingForcedOverrideNames(workingResult))
+      setOverridesActive(true)
       setMajorBuildsActive(true)
+      setTransitivesActive(true)
       setResult(workingResult)
       setStatus('done')
     } catch (error) {
+      if (isAbortError(error)) {
+        setStatus('idle')
+        setResolveProgress(null)
+        return
+      }
       setErrorMsg(error instanceof Error ? error.message : String(error))
       setStatus('error')
     } finally {
-      setPendingAction(null)
+      if (resolveAbortControllerRef.current === abortController) {
+        resolveAbortControllerRef.current = null
+      }
+      setPendingAction(current => current === 'apply-fixes' ? null : current)
     }
+  }
+
+  function handleStopResolve() {
+    resolveAbortControllerRef.current?.abort()
   }
 
   function handleUseOutputAsInput(nextInput: string) {
@@ -423,8 +567,9 @@ export default function App() {
     }
 
     try {
+      parsePackageJson(input)
       return {
-        pkg: parsePackageJson(input),
+        pkg: inputPackage,
         raw: input,
         sourceLabel: 'Input package.json',
         canApply: status !== 'loading' && pendingEngine === null,
@@ -439,7 +584,7 @@ export default function App() {
         applyDisabledReason: 'Fix the input JSON first so the new dependency has somewhere safe to land.',
       }
     }
-  }, [input, outputJson, pendingEngine, result, status])
+  }, [input, inputPackage, pendingEngine, status])
 
   const outputExplorerContext = useMemo(() => {
     if (status === 'done' && outputPackage) {
@@ -461,29 +606,36 @@ export default function App() {
     packageName: string,
     versionSpec: string,
     freeze: boolean,
+    remove = false,
   ): Promise<ReturnType<typeof parsePackageJson>> {
-    const inputPackage = input.trim() ? parsePackageJson(input) : {}
-    const preferredSection =
-      inputPackage.dependencies?.[packageName] ? 'dependencies'
-        : inputPackage.devDependencies?.[packageName] ? 'devDependencies'
-          : inputPackage.peerDependencies?.[packageName] ? 'peerDependencies'
-            : inputPackage.optionalDependencies?.[packageName] ? 'optionalDependencies'
-              : 'dependencies'
+    let nextInput = input
 
-    const withDependency = upsertDependencyValue(
-      input,
-      packageName,
-      versionSpec,
-      spaceIndentSize,
-      preferredSection,
-    )
-    const nextInput = setDependencyFrozen(
-      withDependency,
-      packageName,
-      freeze,
-      spaceIndentSize,
-      preferredSection,
-    )
+    if (remove) {
+      nextInput = removeDependencyValue(input, packageName, spaceIndentSize)
+    } else {
+      const inputPackage = input.trim() ? parsePackageJson(input) : {}
+      const preferredSection =
+        inputPackage.dependencies?.[packageName] ? 'dependencies'
+          : inputPackage.devDependencies?.[packageName] ? 'devDependencies'
+            : inputPackage.peerDependencies?.[packageName] ? 'peerDependencies'
+              : inputPackage.optionalDependencies?.[packageName] ? 'optionalDependencies'
+                : 'dependencies'
+
+      const withDependency = upsertDependencyValue(
+        input,
+        packageName,
+        versionSpec,
+        spaceIndentSize,
+        preferredSection,
+      )
+      nextInput = setDependencyFrozen(
+        withDependency,
+        packageName,
+        freeze,
+        spaceIndentSize,
+        preferredSection,
+      )
+    }
 
     const nextRestrictions = syncRestrictions(
       restrictions,
@@ -492,8 +644,8 @@ export default function App() {
     )
 
     setInput(nextInput)
-    setRestrictions(nextRestrictions)
-    setForcedOverrideNames([])
+      setRestrictions(nextRestrictions)
+    setOverridesActive(true)
     setResult(null)
     setStatus('idle')
 
@@ -505,69 +657,18 @@ export default function App() {
   }
 
   function handleForceOverrides() {
-    if (!result) {
+    if (!result || overrideNames.length === 0) {
       return
     }
-
-    if (forcedOverrideNames.length > 0) {
-      setForcedOverrideNames([])
-      return
-    }
-
-    const nextForcedOverrideNames = getPendingForcedOverrideNames(result)
-    if (nextForcedOverrideNames.length === 0) {
-      return
-    }
-
-    setForcedOverrideNames(nextForcedOverrideNames)
+    setOverridesActive(current => !current)
   }
 
   function handleMajorBuildsToggle() {
     setMajorBuildsActive(current => !current)
   }
 
-  const platformSelectorState = useMemo(
-    () => getPlatformSelectorState(platformAvailableTargets, platformSelection),
-    [platformAvailableTargets, platformSelection],
-  )
-
-  useEffect(() => {
-    const nextSelection = coercePlatformSelection(platformAvailableTargets, platformSelection)
-    if (
-      nextSelection.os === platformSelection.os
-      && nextSelection.arch === platformSelection.arch
-      && nextSelection.runtime === platformSelection.runtime
-    ) {
-      return
-    }
-
-    setPlatformSelection(nextSelection)
-    writeStoredPlatformSelection(nextSelection)
-  }, [platformAvailableTargets, platformSelection])
-
-  function handlePlatformSelectionChange(
-    key: keyof PlatformSelection,
-    value: string,
-  ) {
-    const nextSelection = coercePlatformSelection(platformAvailableTargets, normalizePlatformSelection({
-      ...platformSelection,
-      [key]: value || undefined,
-    }))
-    setPlatformSelection(nextSelection)
-    writeStoredPlatformSelection(nextSelection)
-
-    if (!input.trim()) {
-      return
-    }
-
-    if (platformSelectionResolveTimeoutRef.current !== null) {
-      window.clearTimeout(platformSelectionResolveTimeoutRef.current)
-    }
-
-    platformSelectionResolveTimeoutRef.current = window.setTimeout(() => {
-      platformSelectionResolveTimeoutRef.current = null
-      void runUpdatePackage(input, restrictions, 'update', nextSelection)
-    }, PLATFORM_SELECTION_RESOLVE_DEBOUNCE_MS)
+  function handleTransitivesToggle() {
+    setTransitivesActive(current => !current)
   }
 
   function handleInspectDependency(packageName: string, source: 'input' | 'output') {
@@ -656,63 +757,65 @@ export default function App() {
   const engineControlsDisabled =
     status === 'loading' || pendingEngine !== null || inputValidation.errors.length > 0
 
-  const engineButtons = useMemo<EngineControlButton[]>(() => {
-    return ENGINE_NAMES.map(engineName => {
+  const engineCard = useMemo<EngineControlCard>(() => {
+    const segments = ENGINE_NAMES.map(engineName => {
       const currentValue = inputEngines[engineName]
       const latest = formatLatestVersion(engineName)
       const engineIssueMeta = formatEngineButtonIssue(engineName)
       const frozen = isEngineFrozen(engineName)
+      const label = engineName === 'node' ? 'node' : 'npm'
 
       if (pendingEngine === engineName) {
         return {
-          engineName,
-          label: `engines.${engineName}`,
-          active: false,
-          warning: false,
-          danger: false,
-          hasInput: false,
-          meta: `adding latest ${latest}`,
-          disabled: engineControlsDisabled,
+          status: `${label} adding ${latest}`,
+          present: false,
+          frozen: false,
+          invalid: false,
         }
       }
 
       if (!currentValue) {
         return {
-          engineName,
-          label: `engines.${engineName}`,
-          active: false,
-          warning: false,
-          danger: false,
-          hasInput: false,
-          meta: `add latest ${latest}`,
-          disabled: engineControlsDisabled,
+          status: `${label} add ${latest}`,
+          present: false,
+          frozen: false,
+          invalid: false,
         }
       }
 
       if (engineIssueMeta) {
         return {
-          engineName,
-          label: `engines.${engineName}`,
-          active: false,
-          warning: false,
-          danger: true,
-          hasInput: true,
-          meta: engineIssueMeta,
-          disabled: engineControlsDisabled,
+          status: engineIssueMeta
+            .replace(`engines.${engineName} `, `${label} `)
+            .replace(` doesn't match any published ${engineName === 'node' ? 'Node.js' : 'npm'} version`, ' has no published match')
+            .replace(` isn't a valid semver range`, ' has an invalid range'),
+          present: true,
+          frozen: false,
+          invalid: true,
         }
       }
 
       return {
-        engineName,
-        label: `engines.${engineName}`,
-        active: !frozen,
-        warning: frozen,
-        danger: false,
-        hasInput: true,
-        meta: frozen ? `using override ${currentValue}` : `using latest ${latest}`,
-        disabled: engineControlsDisabled,
+        status: frozen ? `${label} override ${currentValue}` : `${label} latest ${latest}`,
+        present: true,
+        frozen,
+        invalid: false,
       }
     })
+    const hasInvalid = segments.some(segment => segment.invalid)
+    const allPresent = segments.every(segment => segment.present)
+    const anyFrozen = segments.some(segment => segment.frozen)
+    const allFrozen = segments.every(segment => segment.frozen)
+
+    return {
+      label: 'Engines',
+      active: allPresent && !hasInvalid && !anyFrozen,
+      warning: !hasInvalid && allPresent && anyFrozen,
+      danger: hasInvalid,
+      meta: segments.map(segment => segment.status).join(' • '),
+      disabled: engineControlsDisabled,
+      pressed: allPresent && !hasInvalid ? !allFrozen : undefined,
+    }
   }, [engineControlsDisabled, inputEngines, latestVersions, pendingEngine, restrictions, inputValidation.engineIssues])
 
   const optionButtons = useMemo<OptionControlButton[]>(() => {
@@ -758,17 +861,24 @@ export default function App() {
     })
   }, [input, errorMsg, restrictableEntries, restrictions, spaceIndentSize])
 
-  function handleEngineButton(engineName: EngineName) {
-    if (!inputEngines[engineName]) {
-      void handleAddEngine(engineName)
+  async function handleEngineCard() {
+    const invalidEngineNames = ENGINE_NAMES.filter(engineName => Boolean(getEngineIssue(engineName)))
+    if (invalidEngineNames.length > 0) {
       return
     }
 
-    if (getEngineIssue(engineName)) {
+    const missingEngineNames = ENGINE_NAMES.filter(engineName => !inputEngines[engineName])
+    if (missingEngineNames.length > 0) {
+      for (const engineName of missingEngineNames) {
+        await handleAddEngine(engineName)
+      }
       return
     }
 
-    setEngineFrozen(engineName, !isEngineFrozen(engineName))
+    const shouldFreeze = !ENGINE_NAMES.every(engineName => isEngineFrozen(engineName))
+    for (const engineName of ENGINE_NAMES) {
+      setEngineFrozen(engineName, shouldFreeze)
+    }
   }
 
   return (
@@ -788,15 +898,14 @@ export default function App() {
       />
 
       <OptionsBar
-        engineButtons={engineButtons}
+        engineCard={engineCard}
         optionButtons={optionButtons}
         platformSelectors={{
           ...platformSelectorState,
-          selection: platformSelection,
           disabled: status === 'loading' || pendingEngine !== null,
-          onChange: (key, value) => void handlePlatformSelectionChange(key, value),
+          onChange: value => void handlePlatformSelectionChange(value),
         }}
-        onEngineClick={handleEngineButton}
+        onEngineClick={() => void handleEngineCard()}
         onOptionClick={toggleOption}
       />
 
@@ -815,32 +924,50 @@ export default function App() {
             validationSeverity={validationSeverity}
             runtimeError={errorMsg}
             markers={restrictionMarkers}
-            onInspectDependency={packageName => handleInspectDependency(packageName, 'input')}
+            readOnly={status === 'loading'}
+            overriddenDependencyNames={inputSemanticHighlights.overriddenDependencyNames}
+            platformDependencyNames={inputSemanticHighlights.platformDependencyNames}
+            transitiveDependencyNames={inputSemanticHighlights.transitiveDependencyNames}
+            unresolvedDependencyNames={inputSemanticHighlights.unresolvedDependencyNames}
+            onInspectDependency={status === 'loading'
+              ? undefined
+              : packageName => handleInspectDependency(packageName, 'input')}
           />
         </div>
         <div className="app__column">
           <ChangesPane
+            inputPackage={inputPackage}
+            displayPackage={outputPackage}
             result={result}
             status={status}
             progress={resolveProgress}
+            onStopResolve={handleStopResolve}
             onApplyFixes={() => void handleApplyFixes()}
             applyFixesDisabled={status === 'loading' || pendingEngine !== null}
             applyFixesLabel={status === 'loading' && pendingAction === 'apply-fixes' ? 'Applying…' : 'Apply Fixes'}
           />
         </div>
         <div className="app__column">
-          <OutputPane
-            result={result}
-            outputJson={outputJson}
-            onForceOverrides={handleForceOverrides}
-            onToggleMajorBuilds={handleMajorBuildsToggle}
-            onUseAsInput={handleUseOutputAsInput}
-            onInspectDependency={packageName => handleInspectDependency(packageName, 'output')}
-            forcedOverrideNames={forcedOverrideNames}
-            majorBuildsActive={majorBuildsActive}
-            spaceIndentSize={spaceIndentSize}
-            status={status}
-          />
+        <OutputPane
+          result={result}
+          outputJson={outputJson}
+          onForceOverrides={handleForceOverrides}
+          onToggleMajorBuilds={handleMajorBuildsToggle}
+          onToggleTransitives={handleTransitivesToggle}
+          onUseAsInput={handleUseOutputAsInput}
+          onInspectDependency={packageName => handleInspectDependency(packageName, 'output')}
+          overrideNames={overrideNames}
+          overridesActive={overridesActive}
+          majorBuildsActive={majorBuildsActive}
+          overriddenDependencyNames={outputSemanticHighlights.overriddenDependencyNames}
+          platformDependencyNames={outputSemanticHighlights.platformDependencyNames}
+          transitiveDependencyNames={transitiveDependencyNames}
+          highlightTransitiveDependencyNames={outputSemanticHighlights.transitiveDependencyNames}
+          transitivesActive={transitivesActive}
+          unresolvedDependencyNames={outputSemanticHighlights.unresolvedDependencyNames}
+          spaceIndentSize={spaceIndentSize}
+          status={status}
+        />
         </div>
       </main>
     </div>

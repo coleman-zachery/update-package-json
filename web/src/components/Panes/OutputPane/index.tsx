@@ -17,10 +17,18 @@ interface Props {
   outputJson: string
   onForceOverrides: () => void
   onToggleMajorBuilds: () => void
+  onToggleTransitives: () => void
   onUseAsInput: (value: string) => void
   onInspectDependency: (packageName: string) => void
-  forcedOverrideNames: string[]
+  overrideNames: string[]
+  overridesActive: boolean
   majorBuildsActive: boolean
+  overriddenDependencyNames: string[]
+  platformDependencyNames: string[]
+  transitiveDependencyNames: string[]
+  highlightTransitiveDependencyNames: string[]
+  transitivesActive: boolean
+  unresolvedDependencyNames: string[]
   spaceIndentSize: SpaceIndentSize
   status: 'idle' | 'loading' | 'done' | 'error'
 }
@@ -30,33 +38,21 @@ export function OutputPane({
   outputJson,
   onForceOverrides,
   onToggleMajorBuilds,
+  onToggleTransitives,
   onUseAsInput,
   onInspectDependency,
-  forcedOverrideNames,
+  overrideNames,
+  overridesActive,
   majorBuildsActive,
+  overriddenDependencyNames,
+  platformDependencyNames,
+  transitiveDependencyNames,
+  highlightTransitiveDependencyNames,
+  transitivesActive,
+  unresolvedDependencyNames,
   spaceIndentSize,
   status,
 }: Props) {
-  const pendingOverrideNames = (() => {
-    if (!result) {
-      return []
-    }
-
-    const overrideNames = new Set(Object.keys(getStringOverrides(result.updatedPackage)))
-    return result.staleDependencyNames.filter(name => !overrideNames.has(name))
-  })()
-  const overriddenDependencyNames = (() => {
-    if (!result) {
-      return []
-    }
-
-    return [
-      ...new Set([
-        ...Object.keys(getStringOverrides(result.updatedPackage)),
-        ...forcedOverrideNames,
-      ]),
-    ]
-  })()
   const downgradedDependencyNames = (() => {
     if (!result) {
       return []
@@ -112,13 +108,15 @@ export function OutputPane({
         onInspectDependency={onInspectDependency}
         highlightMajorBuildVersions={majorBuildsActive}
         overriddenDependencyNames={overriddenDependencyNames}
+        platformDependencyNames={platformDependencyNames}
+        transitiveDependencyNames={highlightTransitiveDependencyNames}
+        unresolvedDependencyNames={unresolvedDependencyNames}
       />
     )
   }
 
   const outputActionsDisabled = !result || status !== 'done'
-  const forceOverridesActive = forcedOverrideNames.length > 0
-  const forceOverridesDisabled = !result || status !== 'done' || (!forceOverridesActive && pendingOverrideNames.length === 0)
+  const forceOverridesDisabled = !result || status !== 'done' || overrideNames.length === 0
   const majorBuildNames = (() => {
     if (!result) {
       return []
@@ -128,6 +126,7 @@ export function OutputPane({
     return result.latestDependencyNames.filter(name => !overriddenDependencyNames.has(name))
   })()
   const majorBuildsDisabled = !result || status !== 'done' || (!majorBuildsActive && majorBuildNames.length === 0)
+  const transitivesDisabled = !result || status !== 'done' || (!transitivesActive && transitiveDependencyNames.length === 0)
 
   return (
     <div className="output-pane">
@@ -137,11 +136,11 @@ export function OutputPane({
           <div className="output-pane__actions">
             <button
               type="button"
-              className={`output-pane__button${forceOverridesActive ? ' output-pane__button--warning' : ''}`}
+              className={`output-pane__button${overridesActive ? ' output-pane__button--warning' : ''}`}
               onClick={onForceOverrides}
               disabled={forceOverridesDisabled}
             >
-              Force Overrides
+              Overrides
             </button>
             <button
               type="button"
@@ -150,6 +149,14 @@ export function OutputPane({
               disabled={majorBuildsDisabled}
             >
               Major Builds
+            </button>
+            <button
+              type="button"
+              className={`output-pane__button${transitivesActive ? ' output-pane__button--transitives' : ''}`}
+              onClick={onToggleTransitives}
+              disabled={transitivesDisabled}
+            >
+              Transitives
             </button>
             <button
               type="button"

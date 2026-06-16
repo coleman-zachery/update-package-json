@@ -152,6 +152,10 @@
   font-weight: 600;
 }
 
+.summary-line__name--platform {
+  color: rgb(51, 187, 255);
+}
+
 .summary-line__version-old {
   color: var(--danger);
   font-family: monospace;
@@ -162,10 +166,36 @@
   font-family: monospace;
 }
 
+.summary-line--version-change {
+  color: var(--text-primary);
+}
+
+.summary-line__version-input,
+.summary-line__version-output {
+  font-family: monospace;
+}
+
+.summary-line__version-input {
+  color: var(--text-primary);
+}
+
+.summary-line__version-output--upgrade {
+  color: var(--accent-meta);
+}
+
+.summary-line__version-output--downgrade {
+  color: var(--warning-meta);
+}
+
+.summary-line__version-output--override {
+  color: var(--warning);
+}
+
 .summary-line__arrow {
   color: var(--text-muted);
 }
 
+.summary-line__reason,
 .summary-line__peer-source {
   color: var(--text-muted);
   font-size: 0.72rem;

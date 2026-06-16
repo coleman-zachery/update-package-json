@@ -51,6 +51,18 @@
   color: var(--warning-soft);
 }
 
+.output-pane__button--transitives {
+  background: rgb(160, 141, 118);
+  border-color: rgb(160, 141, 118);
+  color: rgb(29, 24, 19);
+}
+
+.output-pane__button--transitives:hover:not(:disabled) {
+  background: rgb(174, 154, 129);
+  border-color: rgb(174, 154, 129);
+  color: rgb(29, 24, 19);
+}
+
 .output-pane__button:disabled {
   opacity: 0.45;
   cursor: not-allowed;

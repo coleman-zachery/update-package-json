@@ -10,6 +10,7 @@ export interface PackageAuditAdvisory {
   summary: string
   severity: AuditSeverity
   url?: string
+  affectedRanges: string[]
 }
 
 export interface PackageAuditReport {
@@ -28,6 +29,18 @@ export interface OsvBatchResponse {
       database_specific?: { severity?: string }
       ecosystem_specific?: { severity?: string }
       references?: Array<{ url?: string }>
+      affected?: Array<{
+        package?: { ecosystem?: string; name?: string }
+        ranges?: Array<{
+          type?: string
+          events?: Array<{
+            introduced?: string
+            fixed?: string
+            last_affected?: string
+            limit?: string
+          }>
+        }>
+      }>
     }>
   }>
 }

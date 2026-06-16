@@ -6,9 +6,10 @@ export {
 export { getVisibleRowVersions } from './rows'
 export type {
   DependencyExplorerColumn,
+  DependencyExplorerColumnKind,
   DependencyExplorerContextSection,
+  DependencyExplorerDependencyCell,
   DependencyExplorerDependencyEntry,
-  DependencyExplorerPlatformDependency,
   DependencyExplorerReport,
   DependencyExplorerRow,
 } from './types'

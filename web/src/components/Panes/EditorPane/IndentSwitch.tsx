@@ -3,14 +3,16 @@ import type { SpaceIndentSize } from '@/lib/indentation'
 interface Props {
   value: SpaceIndentSize
   onToggle: () => void
+  disabled?: boolean
 }
 
-export function IndentSwitch({ value, onToggle }: Props) {
+export function IndentSwitch({ value, onToggle, disabled = false }: Props) {
   return (
     <button
       type="button"
       className={`indent-switch indent-switch--${value === 4 ? 'right' : 'left'}`}
       onClick={onToggle}
+      disabled={disabled}
       role="switch"
       aria-checked={value === 4}
       aria-label={`Use ${value}-space indentation. Click to switch to ${value === 2 ? 4 : 2} spaces.`}

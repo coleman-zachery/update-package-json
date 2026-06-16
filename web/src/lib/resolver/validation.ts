@@ -4,23 +4,29 @@ import { fetchNodeVersions, fetchPackument, getAllVersions } from '@/lib/npm'
 import { filterStable, newestSatisfying } from '@/lib/semver-utils'
 import { formatEngineIssue, formatNpmAlignmentWarning, formatPackageManagerIssue } from './messages'
 import { getTrimmedString, hasMisalignedNpmSupport } from './package-manager'
+import { isAbortError, throwIfAborted } from './abort'
 import type { EngineName, EngineValidationIssue, InputValidationState, PackageManagerValidationIssue } from './types'
 
 async function validateDeclaredEngine(
   engineName: EngineName,
   value: string | undefined,
+  signal?: AbortSignal,
 ): Promise<EngineValidationIssue | null> {
+  throwIfAborted(signal)
   if (!value) return null
   if (!semver.validRange(value)) return { engine: engineName, value, kind: 'invalid-range' }
 
   try {
     const versions = engineName === 'node'
-      ? await fetchNodeVersions()
-      : filterStable(getAllVersions(await fetchPackument('npm')))
+      ? await fetchNodeVersions(signal)
+      : filterStable(getAllVersions(await fetchPackument('npm', signal)))
     if (!newestSatisfying(versions, value)) {
       return { engine: engineName, value, kind: 'no-published-version' }
     }
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
     // ignore validation fetch failures
   }
 
@@ -30,15 +36,17 @@ async function validateDeclaredEngine(
 export async function validateDeclaredEngines(
   rootNode: string | undefined,
   rootNpm: string | undefined,
+  signal?: AbortSignal,
 ): Promise<EngineValidationIssue[]> {
   const issues = await Promise.all([
-    validateDeclaredEngine('node', rootNode),
-    validateDeclaredEngine('npm', rootNpm),
+    validateDeclaredEngine('node', rootNode, signal),
+    validateDeclaredEngine('npm', rootNpm, signal),
   ])
   return issues.filter((issue): issue is EngineValidationIssue => Boolean(issue))
 }
 
-export async function validateDeclaredPackageManager(value: unknown): Promise<PackageManagerValidationIssue | null> {
+export async function validateDeclaredPackageManager(value: unknown, signal?: AbortSignal): Promise<PackageManagerValidationIssue | null> {
+  throwIfAborted(signal)
   const raw = getTrimmedString(value)
   if (!raw) return null
 
@@ -48,11 +56,14 @@ export async function validateDeclaredPackageManager(value: unknown): Promise<Pa
   if (!semver.valid(parsed.version)) return { value: raw, kind: 'invalid-version' }
 
   try {
-    const npmVersions = filterStable(getAllVersions(await fetchPackument('npm')))
+    const npmVersions = filterStable(getAllVersions(await fetchPackument('npm', signal)))
     if (!npmVersions.includes(parsed.version)) {
       return { value: raw, kind: 'no-published-version' }
     }
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw error
+    }
     // ignore validation fetch failures
   }
 

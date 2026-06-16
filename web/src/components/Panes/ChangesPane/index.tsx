@@ -1,19 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { PaneState } from '@/components/PaneState'
 import { PaneHeader } from '@/components/Panes/PaneHeader'
-import {
-  ADDED_SECTION_LABELS,
-  createChangeSummary,
-  type AddedDependencySection,
-} from '@/lib/change-summary'
+import { createChangeSummary } from '@/lib/change-summary'
+import type { PackageJson } from '@/lib/package-json'
 import type { ResolveProgress, ResolveResult } from '@/lib/resolver'
-import { PlatformTargetsSection } from './platform-targets'
 import './index.css'
 
 interface Props {
+  inputPackage?: PackageJson
+  displayPackage?: PackageJson | null
   result: ResolveResult | null
   status: 'idle' | 'loading' | 'done' | 'error'
   progress?: ResolveProgress | null
+  onStopResolve?: () => void
   onApplyFixes?: () => void
   applyFixesDisabled?: boolean
   applyFixesLabel?: string
@@ -32,9 +31,12 @@ function getAuditSectionClassName(state: ResolveResult['auditStatus']['state']):
 }
 
 export function ChangesPane({
+  inputPackage = {},
+  displayPackage = null,
   result,
   status,
   progress = null,
+  onStopResolve,
   onApplyFixes,
   applyFixesDisabled = false,
   applyFixesLabel = 'Apply Fixes',
@@ -87,7 +89,7 @@ export function ChangesPane({
     }
 
     if (status === 'loading') {
-      return <PaneState loading progress={progress} message="Resolving…" />
+      return <PaneState loading progress={progress} message="Resolving…" actionLabel="Stop" onAction={onStopResolve} />
     }
 
     if (status === 'error' || !result) {
@@ -97,17 +99,16 @@ export function ChangesPane({
     const {
       hasAnything,
       engineChanges,
-      dependencyChanges,
-      addedDependenciesBySection,
+      versionChanges,
       unresolvedPeerDependencies,
-    } = createChangeSummary(result)
+    } = createChangeSummary(result, { inputPackage, displayPackage })
 
     return (
       <div ref={contentRef} className="changes-pane__content">
         <section className={getAuditSectionClassName(result.auditStatus.state)}>
           <h3>npm audit</h3>
           <p className="audit-summary__meta">
-            OSV-backed browser advisory check. {result.auditStatus.summary}
+            OSV-backed browser advisory check with deprecated dependency detection. {result.auditStatus.summary}
           </p>
           {result.auditStatus.details.length > 0 ? (
             <ul>
@@ -117,10 +118,6 @@ export function ChangesPane({
             </ul>
           ) : null}
         </section>
-
-        <PlatformTargetsSection
-          platformSupport={result.platformSupport}
-        />
 
         {!hasAnything ? (
           <section className="summary-section summary-section--success">
@@ -191,52 +188,46 @@ export function ChangesPane({
           </section>
         ) : null}
 
-        {dependencyChanges.length > 0 ? (
+        {versionChanges.length > 0 ? (
           <section className="summary-section">
-            <h3>Version changes ({dependencyChanges.length})</h3>
+            <h3>Version changes ({versionChanges.length})</h3>
             <ul>
-              {dependencyChanges.map(change => (
+              {versionChanges.map(change => (
                 <li key={change.name}>
-                  <p className="summary-line">
-                    <span className="summary-line__name">{change.name}</span>{' '}
-                    <span className="summary-line__version-old">{change.from}</span>{' '}
-                    <span className="summary-line__arrow">&rarr;</span>{' '}
-                    <span className="summary-line__version-new">{change.to}</span>
+                  <p className="summary-line summary-line--version-change">
+                    {change.from ? (
+                      <>
+                        <span className={change.isPlatform ? 'summary-line__name summary-line__name--platform' : 'summary-line__name'}>{change.name}</span>{' '}
+                        <span className="summary-line__version-input">{change.from}</span>{' '}
+                        <span className="summary-line__arrow">&rarr;</span>{' '}
+                      </>
+                    ) : (
+                      <>
+                        <span className="summary-line__arrow">&rarr;</span>{' '}
+                        <span className={change.isPlatform ? 'summary-line__name summary-line__name--platform' : 'summary-line__name'}>{change.name}</span>{' '}
+                      </>
+                    )}
+                    <span className={
+                      change.outputTone === 'upgrade'
+                        ? 'summary-line__version-output summary-line__version-output--upgrade'
+                        : change.outputTone === 'override'
+                          ? 'summary-line__version-output summary-line__version-output--override'
+                          : 'summary-line__version-output summary-line__version-output--downgrade'
+                    }>
+                      {change.displayTo}
+                    </span>
+                    {change.reason ? (
+                      <>
+                        {' '}
+                        <span className="summary-line__reason">{change.reason}</span>
+                      </>
+                    ) : null}
                   </p>
                 </li>
               ))}
             </ul>
           </section>
         ) : null}
-
-        {(Object.entries(addedDependenciesBySection) as Array<[AddedDependencySection, Array<(typeof addedDependenciesBySection)[AddedDependencySection][number]>]>)
-          .map(([section, entries]) => {
-            if (entries.length === 0) {
-              return null
-            }
-
-            return (
-              <section key={section} className="summary-section">
-                <h3>{`${ADDED_SECTION_LABELS[section]} (${entries.length})`}</h3>
-                <ul>
-                  {entries.map(change => (
-                    <li key={change.name}>
-                      <p className="summary-line">
-                        <span className="summary-line__name">{change.name}</span>{' '}
-                        <span className="summary-line__version-new">{change.to}</span>
-                        {change.source ? (
-                          <>
-                            {' '}
-                            <span className="summary-line__peer-source">via {change.source}</span>
-                          </>
-                        ) : null}
-                      </p>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )
-          })}
 
         {unresolvedPeerDependencies.length > 0 ? (
           <section className="summary-section summary-section--warn">

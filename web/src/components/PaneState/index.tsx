@@ -5,9 +5,17 @@ interface Props {
   message: string
   loading?: boolean
   progress?: ResolveProgress | null
+  actionLabel?: string
+  onAction?: () => void
 }
 
-export function PaneState({ message, loading = false, progress = null }: Props) {
+export function PaneState({
+  message,
+  loading = false,
+  progress = null,
+  actionLabel,
+  onAction,
+}: Props) {
   const total = progress?.total ?? 0
   const completed = progress?.completed ?? 0
   const percent = total > 0 ? Math.max(0, Math.min(100, (completed / total) * 100)) : 0
@@ -35,6 +43,11 @@ export function PaneState({ message, loading = false, progress = null }: Props) 
         )
       ) : null}
       <p>{message}</p>
+      {actionLabel && onAction ? (
+        <button type="button" className="pane-state__action" onClick={onAction}>
+          {actionLabel}
+        </button>
+      ) : null}
     </div>
   )
 }

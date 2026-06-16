@@ -6,6 +6,9 @@ export interface RootPackageRequest {
   name: string
   section: DependencySection
   sourceName: string
+  sourceVersion?: string
+  rootSourceName?: string
+  rootSourceVersion?: string
   currentValue: string
   requestedRange: string
 }
@@ -40,6 +43,9 @@ export function collectCompanionRootRequests(pkg: PackageJson): RootPackageReque
           name: companionName,
           section,
           sourceName: name,
+          sourceVersion: version,
+          rootSourceName: name,
+          rootSourceVersion: version,
           currentValue: version,
           requestedRange: version,
         })
@@ -48,6 +54,39 @@ export function collectCompanionRootRequests(pkg: PackageJson): RootPackageReque
   }
 
   return Array.from(requests.values()).sort((left, right) =>
+    left.name.localeCompare(right.name),
+  )
+}
+
+export function collectCompanionRequestsFromRootRequests(
+  pkg: PackageJson,
+  requests: RootPackageRequest[],
+  existingNames: Iterable<string> = [],
+): RootPackageRequest[] {
+  const existing = new Set(existingNames)
+  const companionRequests = new Map<string, RootPackageRequest>()
+
+  for (const request of requests) {
+    const companionName = inferCompanionPackageName(request.name)
+    if (!companionName || hasRootPackage(pkg, companionName) || existing.has(companionName)) {
+      continue
+    }
+
+    if (!companionRequests.has(companionName)) {
+      companionRequests.set(companionName, {
+        name: companionName,
+        section: request.section,
+        sourceName: request.name,
+        sourceVersion: request.currentValue,
+        rootSourceName: request.name,
+        rootSourceVersion: request.currentValue,
+        currentValue: request.currentValue,
+        requestedRange: request.requestedRange,
+      })
+    }
+  }
+
+  return Array.from(companionRequests.values()).sort((left, right) =>
     left.name.localeCompare(right.name),
   )
 }

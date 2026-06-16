@@ -1,79 +1,16 @@
 import type { PackageJson } from '@/lib/package-json'
-import type { ResolutionContext } from './pass-context'
 import {
-  extractPlatformSuffix,
   reconcilePlatformTargetsDetailed,
   resolvePlatformSelection,
-} from './platform-targets'
-import type { RootPackageRequest } from './companions'
-import type { DependencySection, PlatformOptionalFamily, PlatformSupport } from './types'
-
-const ROOT_SECTIONS: DependencySection[] = [
-  'dependencies',
-  'devDependencies',
-  'peerDependencies',
-]
-
-function hasRootPackage(pkg: PackageJson, name: string): boolean {
-  return ROOT_SECTIONS.some(section => typeof pkg[section]?.[name] === 'string')
-}
-
-function collectExplicitPlatformSuffixes(pkg: PackageJson): Set<string> {
-  const suffixes = new Set<string>()
-  for (const section of ROOT_SECTIONS) {
-    const values = pkg[section]
-    if (!values) continue
-    for (const name of Object.keys(values)) {
-      const suffix = extractPlatformSuffix(name)
-      if (suffix) suffixes.add(suffix)
-    }
-  }
-  return suffixes
-}
-
-async function collectNativeOptionalDependencyEntries(
-  ctx: ResolutionContext,
-): Promise<Array<{
-  dependencyName: string
-  optionalName: string
-  optionalRange: string
-  section: DependencySection
-    suffix: string
-  }>> {
-  const entries: Array<{
-    dependencyName: string
-    optionalName: string
-    optionalRange: string
-    section: DependencySection
-    suffix: string
-  }> = []
-
-  function addOptionalEntries(
-    dependencyName: string,
-    section: DependencySection,
-    optionalDependencies: Record<string, string> | undefined,
-  ) {
-    if (!optionalDependencies) return
-    for (const [optionalName, optionalRange] of Object.entries(optionalDependencies)) {
-      const suffix = extractPlatformSuffix(optionalName)
-      if (!suffix) continue
-      entries.push({ dependencyName, optionalName, optionalRange, section, suffix })
-    }
-  }
-
-  for (const state of ctx.states.values()) {
-    if (!state.root) continue
-    addOptionalEntries(state.name, state.section, state.manifest.optionalDependencies)
-    for (const [dependencyName, dependencyRange] of Object.entries(state.manifest.dependencies ?? {})) {
-      const analysis = await ctx.getInstallTargetAnalysis(dependencyName, dependencyRange)
-      const installedVersion = analysis.latestEngineCompatibleVersion ?? analysis.latestSatisfyingVersion
-      if (!installedVersion) continue
-      const dependencyManifest = (await ctx.getPackumentCached(dependencyName)).versions[installedVersion]
-      addOptionalEntries(dependencyName, state.section, dependencyManifest?.optionalDependencies)
-    }
-  }
-  return entries
-}
+} from '../platform-targets'
+import type { RootPackageRequest } from '../companions'
+import type { PlatformOptionalFamily, PlatformSupport } from '../types'
+import type { ResolutionContext } from '../pass-context'
+import {
+  collectExplicitPlatformSuffixes,
+  collectNativeOptionalDependencyEntries,
+  hasRootPackage,
+} from './entries'
 
 export async function collectNativeOptionalRootRequests(
   ctx: ResolutionContext,
@@ -92,6 +29,7 @@ export async function collectNativeOptionalRootRequests(
   const entries = await collectNativeOptionalDependencyEntries(ctx)
 
   for (const entry of entries) {
+    ctx.throwIfAborted()
     availableTargets.add(entry.suffix)
     const family = familyMap.get(entry.dependencyName) ?? {
       optionalDependencyNames: new Set<string>(),
@@ -104,11 +42,14 @@ export async function collectNativeOptionalRootRequests(
     familyMap.set(entry.dependencyName, family)
   }
 
-  const availableTargetList = Array.from(availableTargets).sort((left, right) => left.localeCompare(right))
+  const availableTargetList = Array.from(availableTargets)
+    .sort((left, right) => left.localeCompare(right))
   const allIssues: PlatformOptionalFamily['issues'] = []
 
   for (const family of familyMap.values()) {
-    const familyTargets = Array.from(family.availableTargets).sort((left, right) => left.localeCompare(right))
+    ctx.throwIfAborted()
+    const familyTargets = Array.from(family.availableTargets)
+      .sort((left, right) => left.localeCompare(right))
     const inferredResolution = reconcilePlatformTargetsDetailed(
       Array.from(inferredTargets),
       familyTargets,
@@ -138,6 +79,7 @@ export async function collectNativeOptionalRootRequests(
   const activeTargets = new Set<string>(selectedTargets)
 
   for (const entry of entries) {
+    ctx.throwIfAborted()
     if (
       !activeTargets.has(entry.suffix)
       || hasRootPackage(pkg, entry.optionalName)
@@ -151,13 +93,17 @@ export async function collectNativeOptionalRootRequests(
       name: entry.optionalName,
       section: entry.section,
       sourceName: entry.dependencyName,
+      sourceVersion: entry.dependencyVersion,
+      rootSourceName: entry.rootDependencyName,
+      rootSourceVersion: entry.rootDependencyVersion,
       currentValue: entry.optionalRange,
       requestedRange: entry.optionalRange,
     })
   }
 
   return {
-    requests: Array.from(requests.values()).sort((left, right) => left.name.localeCompare(right.name)),
+    requests: Array.from(requests.values())
+      .sort((left, right) => left.name.localeCompare(right.name)),
     platformSupport: {
       availableTargets: availableTargetList,
       selectedTargets,

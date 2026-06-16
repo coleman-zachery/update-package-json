@@ -34,6 +34,7 @@ function findCompatibleDowngrade(state: PackageState, dependents: Array<{ requir
 async function findDependentVersionForPeer(ctx: ResolutionContext, dependent: PackageState, peerName: string, peerVersion: string): Promise<string | null> {
   const packument = await ctx.getPackumentCached(dependent.name)
   for (const candidate of getCandidateSearchOrder(dependent)) {
+    ctx.throwIfAborted()
     const requiredRange = getRequiredPeerDependencies(packument.versions[candidate])[peerName]?.range
     if (!requiredRange || semver.satisfies(peerVersion, requiredRange)) return candidate
   }
@@ -43,6 +44,7 @@ async function findDependentVersionForPeer(ctx: ResolutionContext, dependent: Pa
 async function findDependentVersionForSharedDependency(ctx: ResolutionContext, dependent: PackageState, dependencyName: string, dependencyVersion: string): Promise<string | null> {
   const packument = await ctx.getPackumentCached(dependent.name)
   for (const candidate of getCandidateSearchOrder(dependent)) {
+    ctx.throwIfAborted()
     const requiredRange = getSharedDependencyRequirement(packument.versions[candidate], dependencyName)
     if (!requiredRange || !semver.validRange(requiredRange) || semver.satisfies(dependencyVersion, requiredRange)) return candidate
   }
@@ -73,6 +75,7 @@ function findFirstSharedDependencyConflict(ctx: ResolutionContext): { dependent:
 
 async function stabilizeSharedDependencyConflicts(ctx: ResolutionContext): Promise<void> {
   for (let pass = 0; pass < 200; pass++) {
+    ctx.throwIfAborted()
     const conflict = findFirstSharedDependencyConflict(ctx)
     if (!conflict) break
     const dependencyDowngrade = findCompatibleDowngrade(conflict.dependency, getDependentsForSharedDependency(ctx, conflict.dependency.name))
@@ -91,6 +94,7 @@ async function stabilizeSharedDependencyConflicts(ctx: ResolutionContext): Promi
 
 async function stabilizePeerConflicts(ctx: ResolutionContext): Promise<void> {
   for (let pass = 0; pass < 200; pass++) {
+    ctx.throwIfAborted()
     const conflict = findFirstPeerConflict(ctx)
     if (!conflict) break
     const peerDowngrade = findCompatibleDowngrade(conflict.peer, getDependentsForPeer(ctx, conflict.peer.name))
@@ -120,6 +124,7 @@ function getResolutionGraphSnapshot(ctx: ResolutionContext): string {
 
 export async function stabilizeResolutionGraph(ctx: ResolutionContext): Promise<void> {
   for (let pass = 0; pass < 50; pass++) {
+    ctx.throwIfAborted()
     const previousSnapshot = getResolutionGraphSnapshot(ctx)
     await stabilizeSharedDependencyConflicts(ctx)
     await stabilizePeerConflicts(ctx)

@@ -12,6 +12,7 @@ export async function buildPackageState(
   restrictedRange: string | undefined,
   root: boolean,
 ): Promise<PackageState | null> {
+  ctx.throwIfAborted()
   const packument = await ctx.getPackumentCached(name)
   const allStableVersions = ctx.getSortedStableVersions(packument)
   const latestVersion = allStableVersions[0]
@@ -29,6 +30,7 @@ export async function buildPackageState(
     const dependencyCompatibleCandidates: string[] = []
     const overrideCompatibleCandidates: string[] = []
     for (const version of versions) {
+      ctx.throwIfAborted()
       const overridePlan = await ctx.getTransitiveOverridePlan(packument.versions[version])
       if (!overridePlan) continue
       transitiveOverridePlans[version] = overridePlan
@@ -96,6 +98,7 @@ export async function ensureState(
   root: boolean,
   source?: string,
 ): Promise<PackageState | null> {
+  ctx.throwIfAborted()
   const existing = ctx.states.get(name)
   if (existing) {
     if (root && !existing.root) { existing.root = true; existing.section = section }
@@ -127,6 +130,7 @@ export async function ensureState(
 }
 
 export async function setStateVersion(ctx: ResolutionContext, name: string, nextVersion: string): Promise<boolean> {
+  ctx.throwIfAborted()
   const state = ctx.states.get(name)
   if (!state || state.currentVersion === nextVersion) return false
   const manifest = (await ctx.getPackumentCached(name)).versions[nextVersion]
@@ -145,6 +149,7 @@ export async function setStateVersion(ctx: ResolutionContext, name: string, next
 export async function syncPeerGraph(ctx: ResolutionContext): Promise<void> {
   let changed = true
   while (changed) {
+    ctx.throwIfAborted()
     changed = false
     const requiredPeers = new Map<string, { range: string; sources: Set<string>; section: DependencySection }>()
     for (const state of ctx.states.values()) {
@@ -160,6 +165,7 @@ export async function syncPeerGraph(ctx: ResolutionContext): Promise<void> {
     }
 
     for (const [peerName, request] of requiredPeers) {
+      ctx.throwIfAborted()
       const existing = ctx.states.get(peerName)
       if (existing) {
         if (!existing.root) existing.section = getPreferredSection(existing.section, request.section)

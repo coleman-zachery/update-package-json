@@ -9,6 +9,7 @@ export function createUnavailableAuditStatus(detail?: string): AuditStatus {
     warnings: 1,
     vulnerabilities: 0,
     recommendedUnfreezeNames: [],
+    recommendedRemovalNames: [],
   }
 }
 

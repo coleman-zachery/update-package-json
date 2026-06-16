@@ -26,7 +26,10 @@ import {
   createMarkerExtension,
   createOverrideDependencyHighlightExtension,
   createPackageJsonSyncExtension,
+  createPlatformDependencyHighlightExtension,
   createStaleDependencyHighlightExtension,
+  createTransitiveDependencyHighlightExtension,
+  createUnresolvedDependencyHighlightExtension,
   type TextareaMarker,
 } from '@/components/WhitespaceTextarea/extensions'
 import './index.css'
@@ -46,6 +49,9 @@ interface Props {
   onInspectDependency?: (packageName: string) => void
   highlightMajorBuildVersions?: boolean
   overriddenDependencyNames?: string[]
+  platformDependencyNames?: string[]
+  transitiveDependencyNames?: string[]
+  unresolvedDependencyNames?: string[]
 }
 
 const packageJsonHighlightStyle = HighlightStyle.define([
@@ -66,6 +72,9 @@ export function WhitespaceTextarea({
   onInspectDependency,
   highlightMajorBuildVersions = false,
   overriddenDependencyNames = [],
+  platformDependencyNames = [],
+  transitiveDependencyNames = [],
+  unresolvedDependencyNames = [],
 }: Props) {
   const indentStyle = useMemo(
     () => getEffectiveIndentStyle(value, spaceIndentSize),
@@ -95,16 +104,28 @@ export function WhitespaceTextarea({
       configuredExtensions.push(createPackageJsonSyncExtension(spaceIndentSize))
     }
 
-    if (readOnly && staleDependencyNames.length > 0) {
+    if (staleDependencyNames.length > 0) {
       configuredExtensions.push(createStaleDependencyHighlightExtension(staleDependencyNames))
     }
 
-    if (readOnly && highlightMajorBuildVersions) {
+    if (highlightMajorBuildVersions) {
       configuredExtensions.push(createMajorBuildHighlightExtension())
     }
 
-    if (readOnly && overriddenDependencyNames.length > 0) {
+    if (overriddenDependencyNames.length > 0) {
       configuredExtensions.push(createOverrideDependencyHighlightExtension(overriddenDependencyNames))
+    }
+
+    if (platformDependencyNames.length > 0) {
+      configuredExtensions.push(createPlatformDependencyHighlightExtension(platformDependencyNames))
+    }
+
+    if (transitiveDependencyNames.length > 0) {
+      configuredExtensions.push(createTransitiveDependencyHighlightExtension(transitiveDependencyNames))
+    }
+
+    if (unresolvedDependencyNames.length > 0) {
+      configuredExtensions.push(createUnresolvedDependencyHighlightExtension(unresolvedDependencyNames))
     }
 
     if (!readOnly && markers.length > 0) {
@@ -112,11 +133,13 @@ export function WhitespaceTextarea({
     }
 
     if (onInspectDependency) {
-      configuredExtensions.push(createInspectableDependencyExtension(onInspectDependency))
+      configuredExtensions.push(
+        createInspectableDependencyExtension(onInspectDependency, unresolvedDependencyNames),
+      )
     }
 
     return configuredExtensions
-  }, [ariaLabel, highlightMajorBuildVersions, indentStyle.size, markers, onInspectDependency, overriddenDependencyNames, readOnly, spaceIndentSize, staleDependencyNames])
+  }, [ariaLabel, highlightMajorBuildVersions, indentStyle.size, markers, onInspectDependency, overriddenDependencyNames, platformDependencyNames, readOnly, spaceIndentSize, staleDependencyNames, transitiveDependencyNames, unresolvedDependencyNames])
 
   useLayoutEffect(() => {
     const view = editorViewRef.current

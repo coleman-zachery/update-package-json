@@ -13,9 +13,21 @@ export type DependencyExplorerDependencyKind =
   | 'optional'
   | 'platform-optional'
 
+export type DependencyExplorerColumnKind =
+  | 'peer'
+  | 'required'
+  | 'optional'
+  | 'platform'
+
+export interface DependencyExplorerDependencyCell {
+  value: string
+  kinds: DependencyExplorerColumnKind[]
+}
+
 export interface DependencyExplorerDependencyEntry {
   key: string
   columnKey: string
+  columnKinds: DependencyExplorerColumnKind[]
   displayRange: string
   rawRange: string
   name: string
@@ -26,12 +38,6 @@ export interface DependencyExplorerDependencyEntry {
 export interface DependencyExplorerColumn {
   key: string
   name: string
-  kind: Extract<DependencyExplorerDependencyKind, 'dependency' | 'peer-required' | 'optional'>
-}
-
-export interface DependencyExplorerPlatformDependency {
-  name: string
-  versions: string[]
 }
 
 export interface DependencyExplorerRow {
@@ -42,7 +48,7 @@ export interface DependencyExplorerRow {
   engineNode: string
   engineNpm: string
   directDependencies: DependencyExplorerDependencyEntry[]
-  dependencyValues: Record<string, string>
+  dependencyCells: Record<string, DependencyExplorerDependencyCell>
 }
 
 export interface DependencyExplorerReport {
@@ -53,10 +59,7 @@ export interface DependencyExplorerReport {
   currentResolvedVersion: string | null
   currentSections: DependencyExplorerContextSection[]
   majorSeries: number[]
-  dependencyColumns: DependencyExplorerColumn[]
-  requiredPeerColumns: DependencyExplorerColumn[]
-  optionalDependencyColumns: DependencyExplorerColumn[]
-  platformDependencies: DependencyExplorerPlatformDependency[]
+  columns: DependencyExplorerColumn[]
   rows: DependencyExplorerRow[]
 }
 
